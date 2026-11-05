@@ -1,0 +1,14 @@
+# Host virtualenv for the voice process on the Raspberry Pi (/home/pi/grokbot/venv).
+# ROS 2 imports (rclpy and the message packages) are provided inside the MentorPi
+# container. Do not pip-install them here.
+flask
+requests
+websocket-client
+numpy
+scipy
+Pillow
+opencv-python-headless
+onnxruntime
+faster-whisper
+piper-tts
+pyserial

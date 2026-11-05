@@ -1,0 +1,73 @@
+# Secrets and machine config. Examples (*.env.example) stay in git.
+.env
+.env.*
+!.env.example
+*.env
+!*.env.example
+**/.env
+**/.env.*
+!**/.env.example
+!**/*.env.example
+grokbot.env
+guard.env
+*credentials*
+*secret*
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# Runtime data, logs, conversation stores
+data/
+**/data/
+logs/
+*.log
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.jsonl
+caps.json
+guard.disabled
+ESTOP
+
+# Audio fixtures and generated speech
+*.wav
+*.mp3
+*.ogg
+gb_safety/wavs/
+
+# Editor backups
+*.bak
+*.bak-*
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.python-version
+
+# Model weights and Piper voices (download on the Pi; do not commit)
+*.onnx
+*.ort
+*.pt
+*.pth
+*.bin
+*.gguf
+*.safetensors
+models/
+voices/
+
+# OS and editor junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

@@ -1,0 +1,20 @@
+[Unit]
+Description=Grok Bot motion gate (single path to /controller/cmd_vel, deadman 0.5 s, ESTOP latch)
+After=docker.service
+Wants=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/grokbot
+ExecStart=/bin/bash /home/pi/grokbot/gb_safety/gb_safety_run.sh gate
+ExecStopPost=-/usr/bin/docker exec -u ubuntu MentorPi pkill -INT -f /home/ubuntu/shared/gb_safety/gb_gate.py
+Restart=always
+RestartSec=2
+KillMode=mixed
+TimeoutStopSec=10
+Nice=-10
+
+[Install]
+WantedBy=multi-user.target

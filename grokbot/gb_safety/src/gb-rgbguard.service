@@ -1,0 +1,20 @@
+[Unit]
+Description=Grok Bot RGB obstacle advisory (YOLOv8n, only while moving, nice 12; slows the gate, never speeds it up)
+After=docker.service gb-gate.service
+Wants=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/grokbot
+ExecStart=/bin/bash /home/pi/grokbot/gb_safety/gb_safety_run.sh rgbguard
+ExecStopPost=-/usr/bin/docker exec -u ubuntu MentorPi pkill -INT -f /home/ubuntu/shared/gb_safety/gb_rgbguard.py
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=10
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
