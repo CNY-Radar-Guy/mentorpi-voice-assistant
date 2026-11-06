@@ -1,5 +1,5 @@
 """Local MJPEG fixture. This does not talk to the robot or to port 8080."""
-import json, os, sys, threading, time
+import json, os, sys, tempfile, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -50,8 +50,8 @@ port = httpd.server_address[1]
 threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
 slot = gb_stream.LatestSlot()
-tmp = os.path.dirname(HERE)
-demand = os.path.join(tmp, "demand-stream.json")
+tmp = tempfile.mkdtemp(prefix="gbstream_")
+demand = os.path.join(tmp, "demand.json")
 track = os.path.join(tmp, "rgb_guard.json")
 feed = gb_stream.StockMjpeg("http://127.0.0.1:%d/stream?topic=/ascamera/camera_publisher/rgb0/image" % port,
                             slot, track, demand)
