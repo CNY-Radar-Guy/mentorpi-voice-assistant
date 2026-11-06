@@ -14,7 +14,21 @@ import gb_teach
 # "Hello Wally", "Hey Wally", and a bare "wally" are not wakes. The WonderEcho
 # factory phrase "Hello Hiwonder" is a separate hardware signal and is not this grammar.
 EXACT_WAKE = ("wake", "up", "wally")
+WALLY_LIKE = {"wally", "wallie", "wali", "walley", "wallys"}
 NO_AUTH = "I'll call you John if you like. Saying that does not sign you in, and it doesn't unlock anything."
+
+
+def accept_hardware_event():
+    """The factory WonderEcho event is not a software wake. The chip is not reflashed."""
+    return False
+
+
+def software_wake(text, hardware_event=False):
+    """True only for the spoken phrase. A serial wake event does not count."""
+    if hardware_event and not accept_hardware_event():
+        hardware_event = False
+    decided = classify_wake(text)
+    return bool(decided and decided[0] is True)
 
 def classify_wake(text):
     """Return (matched, remainder) when the utterance mentions wally, else None.
@@ -32,7 +46,7 @@ def classify_wake(text):
     for i in range(0, min(6, max(0, len(norms) - 2))):
         if tuple(norms[i:i + 3]) == EXACT_WAKE:
             return True, " ".join(kept[i + 3:]).strip(" ,.!?")
-    if "wally" in norms[:8]:
+    if any(n in WALLY_LIKE for n in norms[:8]):
         return False, ""
     return None
 

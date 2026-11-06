@@ -181,7 +181,11 @@ def voice_restart_env_ok(env_text):
         return False
     if vals.get("ALLOW_AUTONOMY", "0") == "1":
         return False
-    wake = vals.get("WAKE_WORDS", "wake up wally").lower()
-    if "wake up wally" not in wake:
+    wake = vals.get("WAKE_WORDS", "").strip().strip('"').strip("'").lower()
+    if wake != "wake up wally":
+        return False
+    if vals.get("WAKE_ANYWHERE", "").strip():
+        return False
+    if vals.get("WAKE_FUZZ", "").strip() not in ("", "0", "0.0"):
         return False
     return True

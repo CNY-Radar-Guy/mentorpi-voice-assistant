@@ -141,15 +141,12 @@ class Gate(Node):
     def on_depth(self, m):
         if self.cam_k is None or m.encoding not in ("16UC1", "mono16", "32FC1"): return
         try:
-            import numpy as np
-            if m.encoding == "32FC1":
-                img = np.frombuffer(bytes(m.data), dtype=np.float32).reshape(m.height, m.step // 4)[:, :m.width]
-                raw = img[::16, ::16].ravel()[:200]
-            else:
-                img = np.frombuffer(bytes(m.data), dtype=np.uint16).reshape(m.height, m.step // 2)[:, :m.width]
-                raw = img[::16, ::16].ravel()[:200]
+            img = OB.decode_depth(m.encoding, bytes(m.data), m.height, m.width, m.step, getattr(m, "is_bigendian", 0))
+            if img is None:
+                return
             lidar_m = self.front if self.front is not None and math.isfinite(self.front) else None
-            scale, how = OB.resolve_depth_scale(m.encoding, raw, lidar_m)
+            fwd = OB.center_raw(img, self.cam_k[2], self.cam_k[3])
+            scale, how = OB.resolve_depth_scale(m.encoding, None, lidar_m, forward_raw=fwd, tf_fresh=False)
             if not scale:
                 self.log_throttle("depth unit unconfirmed (%s, %s); not used for range" % (m.encoding, how), 10.0)
                 return

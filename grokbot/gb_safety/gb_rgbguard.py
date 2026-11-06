@@ -50,8 +50,9 @@ class RgbGuard(Node):
         super().__init__("gb_rgbguard")
         cv2.setNumThreads(2)
         self.net = cv2.dnn.readNetFromONNX(MODEL)
-        self.moving = False; self.idle_since = time.time(); self.sub = None; self.depth_sub = None
+        self.moving = False; self.idle_since = time.time(); self.sub = None; self.depth_sub = None; self.info_sub = None
         self.img = None; self.img_t = 0.0; self.depth = None; self.depth_t = 0.0; self.k = None; self.done_t = 0.0
+        self._last_infer = 0.7; self._held_motion = False
         self.create_subscription(String, "/gb/gate_status", self.on_status, 10)
         self.create_timer(0.5, self.manage)
         threading.Thread(target=self.worker, daemon=True).start()
@@ -72,17 +73,31 @@ class RgbGuard(Node):
         except Exception:
             return None
 
+    def _drop_sub(self, name):
+        sub = getattr(self, name, None)
+        if sub is not None:
+            self.destroy_subscription(sub)
+            setattr(self, name, None)
+
     def manage(self):
-        want = self.moving or self.demand() in ("follow", "point", "view")
+        mode = self.demand()
+        if self.moving:
+            self._held_motion = True
+        want = self.moving or mode in ("follow", "point", "view")
+        want_depth = self.moving or mode in ("follow", "point")
         if want and self.sub is None:
             self.sub = self.create_subscription(Image, TOPIC, self.on_img, qos_profile_sensor_data)
+        if want_depth and self.depth_sub is None and self.sub is not None:
             self.depth_sub = self.create_subscription(Image, E("GB_DEPTH_TOPIC", "/ascamera/camera_publisher/depth0/image_raw"), self.on_depth, qos_profile_sensor_data)
             from sensor_msgs.msg import CameraInfo
             self.info_sub = self.create_subscription(CameraInfo, E("GB_DEPTH_INFO", "/ascamera/camera_publisher/depth0/camera_info"), self.on_info, qos_profile_sensor_data)
-        elif not want and self.sub is not None and self.idle_since and time.time() - self.idle_since > 3.0 and not self.demand():
-            self.destroy_subscription(self.sub); self.sub = None; self.img = None
-            if self.depth_sub is not None:
-                self.destroy_subscription(self.depth_sub); self.depth_sub = None
+        if self.sub is not None and not want_depth and not self.moving:
+            self._drop_sub("depth_sub"); self._drop_sub("info_sub"); self.depth = None
+        if not want and self.sub is not None:
+            hold = 3.0 if self._held_motion else 0.0
+            if self.idle_since and time.time() - self.idle_since >= hold:
+                self._drop_sub("sub"); self._drop_sub("depth_sub"); self._drop_sub("info_sub")
+                self.img = None; self.depth = None; self._held_motion = False
 
     def on_img(self, m):
         self.img = m; self.img_t = time.time()                # keep only the newest frame; inference runs elsewhere
@@ -109,7 +124,11 @@ class RgbGuard(Node):
     def worker(self):
         while rclpy.ok():
             m = self.img
-            if (not self.moving and self.demand() not in ("follow", "point", "view")) or m is None or self.img_t <= self.done_t or time.time() - self.done_t < 1.0 / HZ:
+            mode = self.demand()
+            view_only = (not self.moving) and mode == "view"
+            import gb_demand
+            period = gb_demand.view_period(self._last_infer) if view_only else (1.0 / HZ)
+            if (not self.moving and mode not in ("follow", "point", "view")) or m is None or self.img_t <= self.done_t or time.time() - self.done_t < period:
                 time.sleep(0.05); continue
             self.done_t = time.time()
             try:
@@ -117,9 +136,11 @@ class RgbGuard(Node):
                 if m.encoding == "rgb8": img = img[:, :, ::-1]
                 frame_t = self.img_t
                 t0 = time.time(); dets = self.detect(img); ms = (time.time() - t0) * 1000
+                self._last_infer = max(0.05, ms / 1000.0)
                 hz = hazard_from(dets, m.width, m.height)
                 people = [dt for dt in dets if dt[0] == "person"]
-                d = {"t": frame_t, "hazard": bool(hz), "ms": round(ms), "n": len(dets), "wh": [m.width, m.height]}
+                d = {"t": frame_t, "hazard": bool(hz), "ms": round(ms), "infer_s": round(self._last_infer, 3),
+                     "n": len(dets), "detect_ok": True, "wh": [m.width, m.height], "person": None}
                 if hz: d.update(hz)
                 if people:
                     lab, cf, x1, y1, x2, y2 = max(people, key=lambda r: r[1])
@@ -149,7 +170,10 @@ class RgbGuard(Node):
             raw = np.frombuffer(bytes(depth.data), dtype="<f4").reshape(depth.height, depth.width)
             scale, unit = 1.0, "32FC1_metres"
         elif depth.encoding in ("16UC1", "mono16"):
-            raw = np.frombuffer(bytes(depth.data), dtype="<u2").reshape(depth.height, depth.width)
+            import gb_obstacle
+            raw = gb_obstacle.decode_depth(depth.encoding, bytes(depth.data), depth.height, depth.width, depth.step, getattr(depth, "is_bigendian", 0))
+            if raw is None:
+                return
             scale, unit = _health_scale()
             if unit not in ("crosscheck_mm", "crosscheck_m"):
                 return

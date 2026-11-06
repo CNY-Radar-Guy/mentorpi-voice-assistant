@@ -8,6 +8,19 @@ permission to drive.
 import json, os, time
 
 MODES = ("follow", "point", "view")
+VIEW_TTL = 2.0
+VIEW_DUTY = 0.12
+
+
+def view_period(infer_s, duty=VIEW_DUTY, min_s=2.0, max_s=8.0):
+    """Seconds between view-only detections. Duty is a share of one core, not the machine."""
+    try:
+        infer = float(infer_s)
+    except (TypeError, ValueError):
+        infer = 0.7
+    if not (infer > 0):
+        infer = 0.7
+    return min(float(max_s), max(float(min_s), infer / float(duty)))
 
 
 def moves(mode):
@@ -28,7 +41,7 @@ def write_demand(path, mode, now=None):
     return body
 
 
-def read_demand(path, now=None, ttl=30.0):
+def read_demand(path, now=None, ttl=None):
     now = time.time() if now is None else float(now)
     try:
         with open(path) as f:
@@ -37,6 +50,8 @@ def read_demand(path, now=None, ttl=30.0):
         mode = body.get("mode")
     except (OSError, ValueError, KeyError, TypeError):
         return None
+    if ttl is None:
+        ttl = VIEW_TTL if mode == "view" else 30.0
     if age < 0 or age > float(ttl) or mode not in MODES:
         return None
     return mode

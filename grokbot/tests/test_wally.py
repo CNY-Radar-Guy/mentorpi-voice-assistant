@@ -322,14 +322,16 @@ check("free overlay port is usable", free == ("127.0.0.1", 18081) and free_statu
 
 sys.path.insert(0, os.path.dirname(ROOT))
 from deploy.migrate_wake_env import migrate_text
-env = "XAI_API_KEY=secret-keep\nWAKE_WORDS=hello wally,hey wally,wake up g-bot\nWAKE_ANYWHERE=wally,gbot\nWAKE_PROMPT=Wally.\nWAKE_ACK=Hello John, are you ready to rock and roll?\nOTHER=1\n"
+env = "XAI_API_KEY=secret-keep\nWAKE_WORDS=okay wally,ok wally,wake up wally,yo wally,wallie,wali\nWAKE_FUZZ=0.78\nWAKE_ANYWHERE=wallie,wali\nWAKE_PROMPT=Wally.\nWAKE_ACK=Hello John, are you ready to rock and roll?\nSTARTUP_GREETING=\nOTHER=1\n"
 migrated, changed = migrate_text(env)
 check("wake migration changes the allowlist", changed)
-check("hello wally removed", "hello wally" not in migrated and "hey wally" not in migrated)
-check("exact phrase inserted", "WAKE_WORDS=wake up wally,wake up g-bot" in migrated)
-check("bare wally removed from anywhere", "WAKE_ANYWHERE=gbot" in migrated)
-check("prompt migrated", "WAKE_PROMPT=Wake up Wally." in migrated)
-check("ack and secret preserved", "WAKE_ACK=Hello John, are you ready to rock and roll?" in migrated and "XAI_API_KEY=secret-keep" in migrated)
+check("exact phrase replaces aliases", "WAKE_WORDS=wake up wally\n" in migrated and "okay wally" not in migrated)
+check("anywhere and fuzz are cleared", "WAKE_ANYWHERE=\n" in migrated and "WAKE_FUZZ=\n" in migrated)
+check("prompt is left alone", "WAKE_PROMPT=Wally.\n" in migrated)
+check("ack greeting and secret preserved", "WAKE_ACK=Hello John, are you ready to rock and roll?" in migrated and "STARTUP_GREETING=\n" in migrated and "XAI_API_KEY=secret-keep" in migrated)
+check("hardware event is not a wake", gb_wally.accept_hardware_event() is False)
+check("okay wally does not wake", gb_wally.software_wake("okay wally", hardware_event=True) is False)
+check("wallie does not wake", gb_wally.classify_wake("wallie") == (False, ""))
 
 def _span(work, n=30):
     gaps = []

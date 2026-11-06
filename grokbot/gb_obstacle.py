@@ -109,14 +109,98 @@ class DepthView:
     def __init__(self, t=0.0): self.t = t; self.fwd = INF; self.valid_frac = 0.0; self.pts = 0
 
 _GRID = {}
-def resolve_depth_scale(encoding, raw_samples=None, lidar_m=None, driver_scale=None):
+def decode_depth(encoding, data, height, width, step=0, is_bigendian=0):
+    """Raw depth image. Honour the ROS row step and endian flag. No unit is applied."""
+    enc = (encoding or "").strip()
+    if enc in ("16UC1", "mono16"):
+        item, kind = 2, "u2"
+    elif enc == "32FC1":
+        item, kind = 4, "f4"
+    else:
+        return None
+    raw = data if isinstance(data, (bytes, bytearray)) else bytes(data or b"")
+    try:
+        height, width = int(height), int(width)
+    except (TypeError, ValueError):
+        return None
+    if height <= 0 or width <= 0:
+        return None
+    need = width * item
+    try:
+        stride = int(step or 0)
+    except (TypeError, ValueError):
+        stride = 0
+    if stride < need:
+        if len(raw) >= height * need:
+            stride = need
+        else:
+            return None
+    if len(raw) < height * stride:
+        return None
+    import numpy as np
+    endian = ">" if int(is_bigendian or 0) else "<"
+    buf = np.frombuffer(raw[:height * stride], dtype=np.uint8).reshape(height, stride)
+    packed = np.ascontiguousarray(buf[:, :need])
+    return packed.view(np.dtype(endian + kind)).reshape(height, width)
+
+
+def center_raw(image, cx=None, cy=None, radius=2):
+    """Positive raw value on the forward optical ray. Not an image-wide median."""
+    import numpy as np
+    h, w = image.shape[:2]
+    try:
+        x = (w - 1) / 2.0 if cx is None else float(cx)
+        y = (h - 1) / 2.0 if cy is None else float(cy)
+    except (TypeError, ValueError):
+        return None
+    xi = min(max(int(round(x)), 0), w - 1)
+    yi = min(max(int(round(y)), 0), h - 1)
+    patch = image[max(0, yi - radius):yi + radius + 1, max(0, xi - radius):xi + radius + 1]
+    vals = patch[patch > 0]
+    if vals.size == 0:
+        return None
+    return float(np.median(vals))
+
+
+def lidar_forward_m(ranges, angle_min, angle_increment, half_rad=None):
+    """Median range in the forward cone. Not the median of the whole scan."""
+    import math
+    half = math.radians(10) if half_rad is None else float(half_rad)
+    try:
+        a0 = float(angle_min)
+        inc = float(angle_increment)
+    except (TypeError, ValueError):
+        return None
+    vals = []
+    for i, r in enumerate(ranges or ()):
+        try:
+            x = float(r)
+        except (TypeError, ValueError):
+            continue
+        ang = a0 + i * inc
+        while ang > math.pi:
+            ang -= 2 * math.pi
+        while ang < -math.pi:
+            ang += 2 * math.pi
+        if abs(ang) > half or x != x or not (0.05 < x < 30.0):
+            continue
+        vals.append(x)
+    if len(vals) < 3:
+        return None
+    vals.sort()
+    return vals[len(vals) // 2]
+
+
+def resolve_depth_scale(encoding, raw_samples=None, lidar_m=None, driver_scale=None, forward_raw=None, camera_ahead_m=None, tf_fresh=False):
     """Metres per raw depth unit, or (None, reason).
 
     32FC1 is metres by the ROS sensor_msgs convention. 16UC1 / mono16 is not
-    given a unit from the encoding alone. A scale is accepted only from an
-    explicit driver calibration value, or when the median positive sample
-    agrees with a fresh LiDAR range (within 30 %). A uint16 frame with no
-    matching range stays unconfirmed and must not be used for ranging.
+    given a unit from the encoding, from a filter range, or from how large the
+    integers look. A scale is accepted only from an explicit driver calibration
+    value, or when the forward-ray sample agrees with the LiDAR range on that
+    same bearing. A scene-wide median is not that ray. A camera offset is
+    applied only when tf_fresh says the offset was measured. A frame that does
+    not agree stays unconfirmed and must not be used for ranging.
     """
     enc = (encoding or "").strip()
     if driver_scale is not None:
@@ -134,22 +218,39 @@ def resolve_depth_scale(encoding, raw_samples=None, lidar_m=None, driver_scale=N
         ref = float(lidar_m)
     except (TypeError, ValueError):
         return None, "need_lidar_crosscheck"
-    if ref != ref or not (0.4 <= ref <= 6.0):
-        return None, "lidar_range_unusable"
-    vals = []
-    for v in raw_samples or ():
+    # A chassis drawing is not a measured transform. Subtract an offset only when
+    # the caller supplies one from a fresh TF. Otherwise compare the forward ray as-is.
+    ahead = 0.0
+    if tf_fresh and camera_ahead_m is not None:
         try:
-            x = float(v)
+            ahead = float(camera_ahead_m)
         except (TypeError, ValueError):
-            continue
-        if x > 0 and x == x:
-            vals.append(x)
-    if len(vals) < 8:
-        return None, "depth_too_sparse"
-    vals.sort()
-    med = vals[len(vals) // 2]
+            return None, "tf_offset_unusable"
+    expected = ref - ahead
+    if expected != expected or not (0.30 <= expected <= 6.0):
+        return None, "lidar_range_unusable"
+    sample = None
+    if forward_raw is not None:
+        try:
+            sample = float(forward_raw)
+        except (TypeError, ValueError):
+            sample = None
+    else:
+        vals = []
+        for v in raw_samples or ():
+            try:
+                x = float(v)
+            except (TypeError, ValueError):
+                continue
+            if x > 0 and x == x:
+                vals.append(x)
+        if 8 <= len(vals) <= 64:
+            vals.sort()
+            sample = vals[len(vals) // 2]
+    if sample is None or not (sample > 0 and sample == sample):
+        return None, "need_forward_ray"
     for scale, name in ((0.001, "crosscheck_mm"), (1.0, "crosscheck_m")):
-        if abs(med * scale - ref) / ref <= 0.30:
+        if abs(sample * scale - expected) / expected <= 0.30:
             return scale, name
     return None, "crosscheck_disagree"
 

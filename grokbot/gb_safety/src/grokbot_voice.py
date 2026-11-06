@@ -1315,14 +1315,11 @@ def _norm(t):
 WAKE_ANY_MAXPOS = int(E("WAKE_ANY_MAXPOS", "8"))    # wake word deeper in long chatter = overheard, ignore
 
 def match_wake(text):
+    """Software wake is only the exact phrase. Aliases, fuzz, and a serial event are not a match."""
     import gb_wally
-    decided = gb_wally.classify_wake(text)
-    if decided is not None:
-        return decided
-    ok, rest = _match_wake_raw(text)
-    if ok:
-        rest = re.sub(r"^(?:bot|bots|but)\b[\s,.!?]*", "", rest, flags=re.I)   # "hey grok | bot, ..."
-    return ok, rest
+    if not gb_wally.software_wake(text, hardware_event=False):
+        return False, ""
+    return gb_wally.classify_wake(text)
 
 def _match_wake_raw(text):
     """Return (matched, remainder_command). Exact variants or fuzzy 2-3 word windows within the first 6 words.
@@ -1652,7 +1649,8 @@ def voice_loop():
             if mic.noise == 200.0:
                 mic.calibrate(0.6)
             if HW_EVENT.is_set():
-                HW_EVENT.clear(); awake_until = time.time() + WAIT_SPEECH_S
+                HW_EVENT.clear()
+                log("WonderEcho event ignored; software wake is only 'wake up Wally'")
             if followup and awake_until and PLAY_STATE["last_end"]:   # follow-up window runs from the END of our playback
                 awake_until = max(awake_until, gb_estop.followup_deadline(PLAY_STATE["last_end"]))
             # listen in short slices so a hardware wake can interrupt idle listening
@@ -1695,7 +1693,7 @@ def voice_loop():
             if sp < STT_MIN_SPEECH_S:
                 log(f"gate: dropped {len(pcm) / (2 * RATE):.1f}s of audio, speech {sp:.2f}s (noise/music)"); continue
             t0 = time.time()
-            idle_now = not (t_listen < awake_until or HW_EVENT.is_set())
+            idle_now = not (t_listen < awake_until)
             peek = int(float(E("IDLE_PEEK_S", "5")) * RATE) * 2
             if idle_now and len(pcm) > peek + 2 * RATE * 2:
                 # long idle chatter: only check the first seconds for a wake phrase (keeps the mic deaf for less time)
@@ -1710,7 +1708,7 @@ def voice_loop():
                 gb_cadence.observe(len(pcm) / float(2 * RATE), text or "")
             except Exception:
                 pass
-            awake = t_listen < awake_until or HW_EVENT.is_set()   # judged when listening started, not after STT
+            awake = t_listen < awake_until   # a serial Hello Hiwonder event does not open this window
             matched, rest = match_wake(text) if text else (False, "")
             log_heard(text, matched, "awake" if awake else "idle", time.time() - t0)
             log(f"heard: {text!r} wake={matched} awake={awake}")

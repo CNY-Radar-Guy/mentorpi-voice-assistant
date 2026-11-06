@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Surgically fix WAKE_WORDS, WAKE_ANYWHERE, and WAKE_PROMPT.
+"""Overwrite the software wake fields. Leave every other line alone.
 
-Backs up the env file next to itself. Does not rewrite other keys, and does
-not open secrets.env. "wake up wally" is added if WAKE_WORDS already exists.
-Hello/Hey/Hi Wally and a bare wally token are removed. WAKE_ACK is left as-is.
+WAKE_WORDS becomes exactly "wake up wally". WAKE_ANYWHERE and WAKE_FUZZ are
+cleared so an alias or a similarity score cannot wake. WAKE_ACK, the startup
+greeting, and the identity line are not rewritten. The WonderEcho chip is not
+mentioned here and is not reflashed.
 """
 import os, re, sys, time
 
-WAKE_KEYS = ("WAKE_WORDS", "WAKE_ANYWHERE", "WAKE_PROMPT")
-DROP_PHRASES = {"hello wally", "hey wally", "hi wally", "wally"}
+WAKE_KEYS = ("WAKE_WORDS", "WAKE_ANYWHERE", "WAKE_FUZZ")
 EXACT = "wake up wally"
 
 
@@ -26,18 +26,7 @@ def migrate_text(text):
             continue
         key, val = m.group(1), m.group(2)
         nl = "\n" if line.endswith("\n") else ""
-        if key == "WAKE_PROMPT":
-            new = val
-            if val.strip().strip('"').strip("'").lower() in ("wally.", "wally", "hello wally", "hey wally", "hi wally"):
-                new = "Wake up Wally."
-            if new != val:
-                changed = True
-            out.append(key + "=" + new + nl)
-            continue
-        parts = [p for p in _split(val) if p not in DROP_PHRASES]
-        if key == "WAKE_WORDS" and EXACT not in parts:
-            parts.insert(0, EXACT)
-        new = ",".join(parts)
+        new = EXACT if key == "WAKE_WORDS" else ""
         if new != val:
             changed = True
         out.append(key + "=" + new + nl)

@@ -110,6 +110,9 @@ class WD(Node):
             pass
 
     def zero(self, why, serial_ok=True):
+        # 10 Hz while maintenance or estop is held. Do not slow this without a
+        # tested proof that the controller still rejects a competing command.
+        # Serial bytes are sent only when set_motor has no subscriber.
         tw = Twist(); self.zt.publish(tw)
         if self.zm:
             ms = MotorsState(); ms.data = [MotorState(id=i, rps=0.0) for i in (1, 2, 3, 4)]

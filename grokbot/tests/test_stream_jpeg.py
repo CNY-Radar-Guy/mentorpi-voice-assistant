@@ -54,7 +54,7 @@ tmp = tempfile.mkdtemp(prefix="gbstream_")
 demand = os.path.join(tmp, "demand.json")
 track = os.path.join(tmp, "rgb_guard.json")
 feed = gb_stream.StockMjpeg("http://127.0.0.1:%d/stream?topic=/ascamera/camera_publisher/rgb0/image" % port,
-                            slot, track, demand)
+                            slot, track, demand, viewers=lambda: 1)
 feed.start()
 deadline = time.time() + 2
 while time.time() < deadline and feed.frames < 2:

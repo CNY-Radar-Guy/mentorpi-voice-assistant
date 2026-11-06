@@ -85,6 +85,43 @@ class LatestSlot(object):
             self._lock.release()
 
 
+VISUAL_MAX_S = 3.0
+
+
+def visual_mark(track, now):
+    """Display-only box. An age past the motion limit is labeled, and it is not a motion track."""
+    if not track:
+        return None
+    try:
+        tt = float(track.get("t"))
+        box = list(track.get("box"))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if len(box) != 4:
+        return None
+    age = float(now) - tt
+    if age < -1.0:
+        return None
+    try:
+        infer = float(track.get("infer_s") or 0.0)
+    except (TypeError, ValueError):
+        infer = 0.0
+    limit = min(VISUAL_MAX_S, max(STALE_S, infer * 2.0 + 0.3))
+    if age > limit:
+        return None
+    label = "person"
+    conf = track.get("conf")
+    if conf is not None:
+        try:
+            label += " %.2f" % float(conf)
+        except (TypeError, ValueError):
+            pass
+    aged = age > STALE_S
+    if aged:
+        label += " aged %.1fs" % age
+    return {"box": box, "label": label, "aged": aged, "for_motion": False, "age_s": age}
+
+
 def matching_box(frame_t, track, now):
     """Box from the same detection instant, or None if it would be a stale track."""
     if not track:
@@ -101,7 +138,7 @@ def matching_box(frame_t, track, now):
     return box
 
 
-def overlay_jpeg(jpeg, box):
+def overlay_jpeg(jpeg, box, label=None):
     """Draw on a copy of a JPEG. No box, or no OpenCV, returns the original bytes unchanged."""
     if not isinstance(jpeg, (bytes, bytearray)) or not box:
         return jpeg
@@ -119,6 +156,8 @@ def overlay_jpeg(jpeg, box):
     x1 = max(0, min(w - 1, x1)); x2 = max(0, min(w - 1, x2))
     y1 = max(0, min(h - 1, y1)); y2 = max(0, min(h - 1, y2))
     cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    if label:
+        cv2.putText(img, str(label)[:48], (x1, max(12, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1, cv2.LINE_AA)
     ok, out = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
     return out.tobytes() if ok else bytes(jpeg)
 
@@ -266,9 +305,13 @@ class StreamServer(object):
                             continue
                         seen = item[1]
                         frame = item[2]
-                        box = matching_box(item[0], outer.track, time.time())
+                        mark = outer.track if isinstance(outer.track, dict) else None
+                        if mark and mark.get("for_motion") is not False and mark.get("box"):
+                            mark = visual_mark(mark, time.time())
+                        box = mark.get("box") if mark else None
+                        label = mark.get("label") if mark else None
                         if isinstance(frame, (bytes, bytearray)):
-                            shown = overlay_jpeg(frame, box)
+                            shown = overlay_jpeg(frame, box, label)
                             payload = (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(shown)) + shown + b"\r\n"
                         else:
                             shown = draw_box(frame, box) if box else frame
@@ -339,17 +382,43 @@ def read_detector_track(path, now):
         return None
     if len(box) != 4 or now - stamp > STALE_S or stamp - now > 1.0:
         return None
-    return {"t": stamp, "box": box}
+    return {"t": stamp, "box": box, "for_motion": True}
+
+
+def read_visual_track(path, now):
+    """Overlay track. No person is not a detector failure. Motion code must not call this."""
+    try:
+        with open(path) as f:
+            body = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(body, dict):
+        return None
+    person = body.get("person")
+    if not isinstance(person, dict):
+        if body.get("detect_ok"):
+            return {"box": None, "no_person": True, "for_motion": False}
+        return None
+    mark = visual_mark({
+        "t": person.get("t", body.get("t")),
+        "box": person.get("box"),
+        "conf": person.get("conf"),
+        "infer_s": body.get("infer_s"),
+    }, now)
+    if mark is None and body.get("detect_ok"):
+        return {"box": None, "no_person": True, "for_motion": False}
+    return mark
 
 
 class StockMjpeg(object):
     """Read the stock web_video_server MJPEG URL. Does not bind port 8080."""
 
-    def __init__(self, url, slot, track_path="", demand_path=""):
+    def __init__(self, url, slot, track_path="", demand_path="", viewers=None):
         self.url = url
         self.slot = slot
         self.track_path = track_path
         self.demand_path = demand_path
+        self.viewers = viewers if viewers is not None else (lambda: 0)
         self.stop = threading.Event()
         self.thread = None
         self.frames = 0
@@ -387,7 +456,10 @@ class StockMjpeg(object):
             pass
 
     def _note_demand(self):
-        if not self.demand_path or time.time() - self._demand_at < 5.0:
+        if not self.demand_path or self.viewers() <= 0:
+            self._release_view()
+            return
+        if time.time() - self._demand_at < 1.0:
             return
         try:
             import gb_demand
@@ -415,12 +487,19 @@ class StockMjpeg(object):
 
     def _run(self):
         while not self.stop.is_set():
+            if self.viewers() <= 0:
+                self._release_view()
+                time.sleep(0.1)
+                continue
             sock = None
             try:
                 sock = self._connect()
                 buf = b""
                 header = True
                 while not self.stop.is_set():
+                    if self.viewers() <= 0:
+                        self._release_view()
+                        break
                     try:
                         chunk = sock.recv(8192)
                     except TimeoutError:
@@ -477,11 +556,11 @@ def main():
     url = os.environ.get("STOCK_MJPEG_URL", STOCK_MJPEG_URL)
     track = os.environ.get("GB_RGB_FILE", "/home/pi/docker/tmp/gb_safety/rgb_guard.json")
     demand = os.environ.get("GB_DEMAND_FILE", "/home/pi/docker/tmp/gb_safety/demand.json")
-    feed = StockMjpeg(url, server.slot, track, demand)
+    feed = StockMjpeg(url, server.slot, track, demand, viewers=lambda: server.clients)
 
     def _track_loop():
         while not feed.stop.is_set():
-            server.track = read_detector_track(track, time.time())
+            server.track = read_visual_track(track, time.time())
             time.sleep(0.05)
 
     threading.Thread(target=_track_loop, name="stream-track", daemon=True).start()
