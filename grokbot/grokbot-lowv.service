@@ -8,6 +8,7 @@ User=pi
 SupplementaryGroups=audio dialout
 WorkingDirectory=/home/pi/grokbot
 EnvironmentFile=/home/pi/grokbot/grokbot.env
+EnvironmentFile=-/home/pi/grokbot/secrets.env
 Environment=PYTHONUNBUFFERED=1 HOME=/home/pi
 ExecStart=/home/pi/grokbot/venv/bin/python /home/pi/grokbot/gb_lowv.py
 Restart=always

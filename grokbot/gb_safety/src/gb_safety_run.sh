@@ -13,6 +13,7 @@ HOST_ESTOP=$GB/data/ESTOP
 mkdir -p "$SH" "$GB/data"
 cp -f "$GB/gb_safety/gb_$WHAT.py" "$SH/gb_$WHAT.py"
 cp -f "$GB/gb_obstacle.py" "$SH/gb_obstacle.py"            # 2026-11-05: obstacle fusion shared by gate + explore
+cp -f "$GB/gb_health.py" "$SH/gb_health.py"                # ranging mode for autonomous vs teleop
 NICE=""
 if [ "$WHAT" = rgbguard ]; then
   cp -f "$GB/models/yolov8n.onnx" "$SH/yolov8n.onnx"; NICE="nice -n 12"   # advisory only: never starve the safety loop
@@ -47,6 +48,20 @@ for i in $(seq 1 120); do
 done
 # ROS graph must be up (bringup launch running) before we start
 for i in $(seq 1 90); do pgrep -f "ros2 launch bringup" >/dev/null && docker exec $C pgrep -f "ros2 launch bringup" >/dev/null && break; sleep 2; done
+# Historical boot race: python started before rclpy was on the path, systemd then restarted.
+# Wait here and publish nothing until the import works. A miss exits so systemd retries.
+ready=0
+for i in $(seq 1 30); do
+  if docker exec -u ubuntu $C bash -lc 'source /opt/ros/humble/setup.bash; python3 -c "import rclpy"' >/dev/null 2>&1; then
+    ready=1; log "rclpy import ok (try $i)"; break
+  fi
+  log "rclpy not importable yet (try $i/30); $WHAT not started, no motion"
+  sleep 2
+done
+if [ "$ready" != 1 ]; then
+  log "rclpy still missing; exit for systemd retry. No velocity published."
+  exit 1
+fi
 docker exec -u ubuntu $C pkill -f "/home/ubuntu/shared/gb_safety/gb_$WHAT.py" 2>/dev/null
 
 MIR=""

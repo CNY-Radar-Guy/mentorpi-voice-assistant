@@ -200,11 +200,12 @@ def kill_phrase(text, moving=False):
         return False                        # "go forward 4 seconds then stop" is a command, not a kill
     return len(t.split()) <= 4
 
-_RESUME = re.compile(r"^" + _WAKE + r"(?:resume|resume motion|resume driving|okay go|ok go|all clear|release (?:the )?(?:e ?stop|stop|brake)|"
+_RESUME = re.compile(r"^" + _WAKE + r"(?:resume|resume motion|resume driving|okay go|ok go|unlock|unlock motion|"
+                     r"all clear|release (?:the )?(?:e ?stop|stop|brake)|"
                      r"clear (?:the )?(?:e ?stop|emergency stop))(?: please| now)?$")
 
 def _resume_core(t):
-    return bool(_RESUME.match(t)) or t in ("resume", "okay go", "ok go", "okay, go")
+    return bool(_RESUME.match(t)) or t in ("resume", "okay go", "ok go", "okay, go", "unlock", "unlock motion")
 
 def resume_phrase(text):
     t = re.sub(r"\bresume(?: resume)+\b", "resume", _norm(text))       # "resume resume" (log 08:13:04)

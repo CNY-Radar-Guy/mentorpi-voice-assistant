@@ -44,7 +44,7 @@ MEM_CLEAR = 0.60                           # ...or when depth sees the spot (>0.
 STALL_MIN_CMD = 0.03; STALL_RATIO = 0.3; STALL_GRACE = 0.8; STALL_HOLD = 0.5
 STALL_MIN_ANG = 0.25
 SLIP_WIN = 1.2; SLIP_MIN_ODOM = 0.05; SLIP_FRAC = 0.25; SLIP_RANGE = 2.0
-JOLT = _f("OBS_JOLT", 7.0); TILT_DEG = _f("OBS_TILT_DEG", 20.0); TILT_HOLD = 0.3  # was jolt 3.5 / soft-tilt 15; hard 25 unchanged
+JOLT = _f("OBS_JOLT", 7.0); TILT_DEG = _f("OBS_TILT_DEG", 15.0); TILT_HOLD = 0.3  # 15-25 deg: stop, no back-off
 TILT_HARD = _f("OBS_TILT_HARD_DEG", 25.0); TILT_HARD_HOLD = 0.2   # pitch OR roll (or combined) > 25 deg -> latch ESTOP
 TILT_LPF = 0.2                             # gravity low-pass per IMU sample (~0.1 s at 48 Hz): rejects jolts / vibration
 INF = float("inf")
@@ -109,12 +109,67 @@ class DepthView:
     def __init__(self, t=0.0): self.t = t; self.fwd = INF; self.valid_frac = 0.0; self.pts = 0
 
 _GRID = {}
-def depth_analyze(img_mm, fx, fy, cx, cy, t=None, step=None):
-    """img_mm: HxW uint16 depth in mm (0 = invalid). Downsampled by `step`; returns the corridor obstacle distance
-    (from the LiDAR centre) of things 5-30 cm above the floor (below / above the LiDAR plane at 18.4 cm)."""
+def resolve_depth_scale(encoding, raw_samples=None, lidar_m=None, driver_scale=None):
+    """Metres per raw depth unit, or (None, reason).
+
+    32FC1 is metres by the ROS sensor_msgs convention. 16UC1 / mono16 is not
+    given a unit from the encoding alone. A scale is accepted only from an
+    explicit driver calibration value, or when the median positive sample
+    agrees with a fresh LiDAR range (within 30 %). A uint16 frame with no
+    matching range stays unconfirmed and must not be used for ranging.
+    """
+    enc = (encoding or "").strip()
+    if driver_scale is not None:
+        try:
+            s = float(driver_scale)
+        except (TypeError, ValueError):
+            s = 0.0
+        if s > 0:
+            return s, "driver"
+    if enc == "32FC1":
+        return 1.0, "32FC1_metres"
+    if enc not in ("16UC1", "mono16"):
+        return None, "unsupported_encoding"
+    try:
+        ref = float(lidar_m)
+    except (TypeError, ValueError):
+        return None, "need_lidar_crosscheck"
+    if ref != ref or not (0.4 <= ref <= 6.0):
+        return None, "lidar_range_unusable"
+    vals = []
+    for v in raw_samples or ():
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            continue
+        if x > 0 and x == x:
+            vals.append(x)
+    if len(vals) < 8:
+        return None, "depth_too_sparse"
+    vals.sort()
+    med = vals[len(vals) // 2]
+    for scale, name in ((0.001, "crosscheck_mm"), (1.0, "crosscheck_m")):
+        if abs(med * scale - ref) / ref <= 0.30:
+            return scale, name
+    return None, "crosscheck_disagree"
+
+
+def depth_analyze(img_mm, fx, fy, cx, cy, t=None, step=None, scale_m=None):
+    """Downsampled corridor distance from the LiDAR centre.
+
+    scale_m is metres per raw unit. None leaves the view invalid: a mono16
+    buffer is not assumed to be millimetres. Synthetic tests that build
+    millimetre images pass scale_m=0.001 themselves.
+    """
     import numpy as np
     step = step or DEPTH_STEP
     d = DepthView(time.time() if t is None else t)
+    try:
+        scale = float(scale_m)
+    except (TypeError, ValueError):
+        scale = 0.0
+    if not (scale > 0):
+        return d
     s = img_mm[::step, ::step]
     h, w = s.shape
     key = (h, w, step, fx, fy, cx, cy)
@@ -122,7 +177,7 @@ def depth_analyze(img_mm, fx, fy, cx, cy, t=None, step=None):
         vv, uu = np.mgrid[0:h, 0:w]
         _GRID.clear(); _GRID[key] = (((uu * step) - cx) / fx, ((vv * step) - cy) / fy)
     ku, kv = _GRID[key]
-    Z = s.astype(np.float32) * 0.001
+    Z = s.astype(np.float32) * scale
     valid = (Z > 0.10) & (Z <= DEPTH_ZMAX)
     Y = kv * Z; X = ku * Z
     hgt = CAM_Z - Y; xr = Z + CAM_X; yr = -X
@@ -174,7 +229,7 @@ class Slip:
 class Imu:
     """IMU events (2026-11-05 live fix):
     * jolt: high-passed |a_xy| > JOLT while moving (2 samples)         -> 'jolt'      stop + back off (gate)
-    * tilt: pitch OR roll (or combined) 15-25 deg, low-passed, 0.3 s     -> 'tilt'      stop, NO back-off
+    * tilt: pitch OR roll (or combined) >= 15 and <= 25 deg, low-passed, 0.3 s -> 'tilt' stop, NO back-off
     * hard: pitch OR roll > 25 deg, or combined tilt > 25 deg, 0.2 s    -> 'tilt_hard' zero motors + latch ESTOP, NO back-off
     Axes: IMU mounted yaw -90 deg, so robot pitch = atan2(a_y, a_z), roll = atan2(-a_x, a_z) (thresholds are symmetric)."""
     def __init__(self):
@@ -199,7 +254,7 @@ class Imu:
             self.n += 1
             if self.n >= 2: ev, kind = "jolt %.1f m/s2 (bump / sudden stop)" % hp, "jolt"
         else: self.n = 0
-        if axis > TILT_DEG or tot > TILT_DEG:
+        if axis >= TILT_DEG or tot >= TILT_DEG:
             if self.tilt_since is None: self.tilt_since = t
             if t - self.tilt_since >= TILT_HOLD:
                 ev, kind = "tilted pitch %.0f / roll %.0f deg (climbing / stuck on something)" % (pitch, roll), "tilt"

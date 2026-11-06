@@ -66,11 +66,16 @@ DEPTH_STOP  = fenv("GUARD_DEPTH_STOP", 0.30)      # m from the depth camera
 DEPTH_STALE = fenv("GUARD_DEPTH_STALE_S", 0.6)
 
 def read_caps():
+    """Missing file: no user disable (lidar guard may run). Malformed file: do not treat that as both sensors on."""
     try:
         with open(CAPS_FILE) as fh: d = json.load(fh)
-        return bool(d.get("lidar", True)), bool(d.get("camera", True))
-    except Exception:
+    except FileNotFoundError:
         return True, True
+    except Exception:
+        return False, False
+    if not isinstance(d, dict) or not isinstance(d.get("lidar"), bool) or not isinstance(d.get("camera"), bool):
+        return False, False
+    return d["lidar"], d["camera"]
 
 def mission_state(now=None):
     """(bypass: bool, why: str). Fail-safe: any doubt -> (False, reason) = guard active."""
@@ -133,8 +138,8 @@ class Guard(Node):
             if mode != self._mode_logged:
                 self._mode_logged = mode
                 self.get_logger().warn({"lidar": "sensor mode: LiDAR guard",
-                                        "depth": "sensor mode: LiDAR gated off -> depth-camera front stop (stop-only)",
-                                        "blind": "sensor mode: LiDAR and camera gated off -> all forward motion suppressed"}[mode])
+                                        "depth": "sensor mode: user switched LiDAR off -> depth-camera front stop (stop-only)",
+                                        "blind": "sensor mode: user switched LiDAR and camera off -> forward motion suppressed"}[mode])
         return self._caps[1], self._caps[2]
 
     def depth_mode(self):

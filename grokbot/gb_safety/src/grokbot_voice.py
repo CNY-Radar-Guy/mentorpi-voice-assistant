@@ -387,9 +387,16 @@ def tts(text):
         from piper import PiperVoice
         _piper = PiperVoice.load(PIPER_VOICE)
     cfg = None
-    if PIPER_LENGTH_SCALE or PIPER_SPEAKER:
+    scale = PIPER_LENGTH_SCALE
+    if not scale:
+        try:
+            import gb_cadence
+            scale = gb_cadence.current_scale() or 0
+        except Exception:
+            scale = 0
+    if scale or PIPER_SPEAKER:
         from piper import SynthesisConfig
-        cfg = SynthesisConfig(length_scale=PIPER_LENGTH_SCALE or None,
+        cfg = SynthesisConfig(length_scale=scale or None,
                               speaker_id=int(PIPER_SPEAKER) if PIPER_SPEAKER else None)
     bio = io.BytesIO()
     with wave.open(bio, "wb") as w:
@@ -451,8 +458,8 @@ def chat_call(backend, messages, max_tokens, category):
     if backend == "xai":
         url = f"{XAI_BASE_URL}/chat/completions"; model = XAI_CHAT_MODEL
         headers = {"Authorization": f"Bearer {xai_key()}", "x-grok-conv-id": "mentorpi-grokbot"}
-        body = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.6,
-                "reasoning_effort": "none"}                  # 2026-11-05: skip reasoning tokens for spoken latency
+        # Non-reasoning Grok models reject a reasoning field. Omit it.
+        body = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.6}
     else:
         url = f"{OLLAMA_BASE_URL}/chat/completions"; model = OLLAMA_MODEL; headers = {}
         body = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.6}
@@ -467,7 +474,6 @@ def vision_call(jpeg, question, label_lines):
     b64 = base64.b64encode(jpeg).decode()
     prompt = VISION_PROMPT + ("\nKnown labels (name, map x,y, note):\n" + "\n".join(label_lines) if label_lines else "")
     body = {"model": XAI_VISION_MODEL, "max_output_tokens": VISION_MAX_TOKENS,
-            "reasoning": {"effort": "none"},                 # 2026-11-05: spoken cadence; skip chain-of-thought
             "input": [{"role": "system", "content": prompt},
                       {"role": "user", "content": [
                           {"type": "input_image", "image_url": f"data:image/jpeg;base64,{b64}", "detail": "high"},
@@ -738,14 +744,25 @@ ESTOP_ACTIONS = {"explore": lambda: _explore().abort("ESTOP"), "features": lambd
                  "track": _stop_track, "nav2": _nav2_stop}
 
 def do_estop(why="", src="voice"):
-    """THE kill switch: latch file, zero, cancel missions/follow/tracker/Nav2/features. Latched until resume."""
+    """THE kill switch: latch file, zero, cancel missions/follow/tracker/Nav2/features. Latched until an explicit unlock."""
+    try:
+        import gb_wally
+        gb_wally.drop_goals("estop")
+    except Exception as ex:
+        log("drop goals failed:", ex)
     gb_estop.estop(src, why, actions=ESTOP_ACTIONS)
-    return "Emergency stop. Motors are latched off. Say resume when it's safe."
+    return "Emergency stop. Motors are latched off. Say unlock or resume when it's safe. I will not continue the old trip."
 
 def do_resume():
+    """Unlock clears the latch only. It does not resume a goal, a follow, or a mission."""
+    try:
+        import gb_wally
+        gb_wally.drop_goals("unlock")
+    except Exception as ex:
+        log("drop goals failed:", ex)
     if gb_estop.clear("voice"):
-        return "Released. Motion is allowed again. I'm not moving; give me a new command."
-    return "I wasn't latched. Motion is allowed."
+        return "Unlocked. I am not resuming the last trip. Give me a new command."
+    return "I wasn't latched. I'm not moving."
 
 def do_timed(p):
     """Timed drive / turn: ONE request to the gate; the gate owns the deadline (default 3 s, hard cap 10 s)."""
@@ -901,7 +918,7 @@ def grok_route(user_text):
         r = _http.post(f"{XAI_BASE_URL}/chat/completions", timeout=60,
                          headers={"Authorization": f"Bearer {xai_key()}", "x-grok-conv-id": "mentorpi-grokbot-router"},
                          json={"model": XAI_CHAT_MODEL, "messages": msgs, "max_tokens": int(E("ROUTER_MAX_TOKENS", "400")),
-                               "temperature": 0.2, "reasoning_effort": "none"})
+                               "temperature": 0.2})
         r.raise_for_status(); j = r.json()
         tokens = store.log_usage("xai", XAI_CHAT_MODEL, "conversation", j.get("usage"))
         raw = (j["choices"][0]["message"].get("content") or "").strip()
@@ -1037,6 +1054,14 @@ def intent(text):
     _k = estop_intent(text)
     if _k:
         return _k, "local"
+    try:
+        import gb_wally
+        _wy = gb_wally.handle(text)
+    except Exception as ex:
+        _wy = None
+        log("wally intent failed:", ex)
+    if _wy:
+        return _wy, "local"
     try:
         import gb_perceive
         _pr = gb_perceive.intent(t, {"explore": _explore(), "announce": _announce(False), "store": store})
@@ -1222,21 +1247,26 @@ def find_wonderecho_port():
 
 # ============================================================================= local voice loop
 # Two wake paths, both active:
-#  * software phrase (WAKE_WORDS, default "wake up G-Bot"): the mic listens continuously, each utterance is
-#    transcribed locally (faster-whisper, biased toward the wake phrase) and fuzzy-matched;
-#  * hardware: the WonderEcho Pro firmware wake word ("Hello Hiwonder") sends AA 55 03 00 FB on its serial port.
+#  * software phrase: exact "wake up Wally" (see gb_wally.classify_wake). Hello/Hey Wally and a
+#    bare "wally" are not wakes. Legacy G-Bot phrases stay exact-or-fuzzy only when the
+#    utterance does not mention wally.
+#  * hardware: WonderEcho Pro factory firmware still sends "Hello Hiwonder" (AA 55 03 00 FB).
+#    That chip is not reflashed by this software.
 # Everything heard is logged to ~/grokbot/data/heard/YYYY-MM-DD.jsonl (text, matched, wake source).
 import difflib
-WAKE_WORDS = [w.strip().lower() for w in E("WAKE_WORDS", "wake up g-bot,wake up gbot,wake up g bot,wake up gee bot,"
+WAKE_WORDS = [w.strip().lower() for w in E("WAKE_WORDS", "wake up wally,"
+              "wake up g-bot,wake up gbot,wake up g bot,wake up gee bot,"
               "wake up jibot,wake up the bot,wake up gbot,wake up jeebot,wake up g. bot,hey grok,hey grock,a grok,hey groc,hey grog").split(",") if w.strip()]
+WAKE_WORDS = [w for w in WAKE_WORDS if w not in ("hello wally", "hey wally", "hi wally", "wally")]
 WAKE_ANYWHERE = set(_x.strip().lower() for _x in os.environ.get("WAKE_ANYWHERE","gbot,grok,grock,groc,grog,jibot,jeebot").split(",") if _x.strip())
 WAKE_ANYWHERE |= {"grokbot", "grockbot", "grogbot", "grocbot", "grokbots", "grockbots", "grokbott", "groqbot", "grokebot",
                   "gbots", "geebot", "jeebot", "rockbot", "grok", "groq"}
+WAKE_ANYWHERE.discard("wally")
 WAKE_TOKEN_FUZZ = float(E("WAKE_TOKEN_FUZZ", "0.80"))      # single word ~ "grokbot" (e.g. grogbot, grakbot)
 WAKE_FUZZ = float(E("WAKE_FUZZ", "0.78"))
 HW_WAKE = E("HW_WAKE", "1") == "1"
 LOG_HEARD = E("LOG_HEARD", "1") == "1"
-WAKE_ACK = E("WAKE_ACK", "Yes?")
+WAKE_ACK = E("WAKE_ACK", "Hello John, are you ready to rock and roll?")
 FOLLOWUP_FILLERS = {"bye", "all right", "alright", "okay", "ok", "so", "yeah", "yes", "no", "um", "uh", "hmm", "thank you",
                     "thanks", "you", "right", "cool", "nice", "wow", "oh", "huh", "what", "goodbye", "okay okay"}
 WAKE_ECHO = re.compile(r"^(?:\W*(?:wait|okay|ok|hey|hi|hello|hallo)?[ ,]*(?:hi|he|high|hey)[ -]?(?:wonder|wander|wonders)\W*)+", re.I)
@@ -1247,6 +1277,10 @@ def _norm(t):
 WAKE_ANY_MAXPOS = int(E("WAKE_ANY_MAXPOS", "8"))    # wake word deeper in long chatter = overheard, ignore
 
 def match_wake(text):
+    import gb_wally
+    decided = gb_wally.classify_wake(text)
+    if decided is not None:
+        return decided
     ok, rest = _match_wake_raw(text)
     if ok:
         rest = re.sub(r"^(?:bot|bots|but)\b[\s,.!?]*", "", rest, flags=re.I)   # "hey grok | bot, ..."
@@ -1265,7 +1299,7 @@ def _match_wake_raw(text):
         for i in range(0, min(6, len(words)) if L > 1 else 1):
             if words[i:i + L] == ww:
                 return True, rest(i + L)
-    targets = [_norm(w) for w in WAKE_WORDS if len(_norm(w).split()) >= 3]   # short ones ("hey grok") exact only
+    targets = [_norm(w) for w in WAKE_WORDS if len(_norm(w).split()) >= 3 and "wally" not in _norm(w).split()]
     for i in range(min(6, len(words))):
         for L in (4, 3, 2):
             win = " ".join(words[i:i + L])
@@ -1481,11 +1515,17 @@ def stop_listener():
             else:
                 log(f"stop listener heard (no kill): {tx!r}")
         except Exception as ex:
-            log("stop listener error:", ex)
+            import gb_health
+            dead = p is not None and p.poll() is not None
+            kind = gb_health.audio_io_kind(ex, cancelling=dead or bool(PLAY_STATE.get("cancel_gen")))
+            if kind == "cancel":
+                log("arecord interrupted during barge-in cancel")
+            else:
+                log("audio failure (stop listener):", repr(ex))
             try:
                 if p: p.terminate(); p.wait()
             except Exception: pass
-            p = None; time.sleep(1.0)
+            p = None; time.sleep(0.2 if kind == "cancel" else 1.0)
 
 MAIN_BUSY = {"busy": False}
 
@@ -1562,10 +1602,10 @@ def voice_loop():
         stt(pcm_to_wav(b"\0" * RATE)); stt(pcm_to_wav(b"\0" * RATE), idle=True)   # load both whisper models
     except Exception as ex:
         log("whisper load failed:", ex)
-    greet = E("STARTUP_GREETING", f"Hi, I'm {BOT_NAME}. Say wake up G-Bot to wake me.")   # empty = silent start
+    greet = E("STARTUP_GREETING", "")   # empty unless the env sets one; sanity boots stay quiet
     if greet.strip(): speak(greet)
     mic = Mic(); awake_until = 0.0; followup = False
-    prompt = E("WAKE_PROMPT", "Wake up, G-Bot.")
+    prompt = E("WAKE_PROMPT", "Wake up Wally.")
     while True:
         try:
             MAIN_BUSY["busy"] = False
@@ -1627,6 +1667,11 @@ def voice_loop():
             else:
                 text = (stt(pcm_to_wav(pcm), prompt=None if awake_until else prompt, idle=idle_now) or "").strip()
             t_stt = time.time() - t0
+            try:
+                import gb_cadence
+                gb_cadence.observe(len(pcm) / float(2 * RATE), text or "")
+            except Exception:
+                pass
             awake = t_listen < awake_until or HW_EVENT.is_set()   # judged when listening started, not after STT
             matched, rest = match_wake(text) if text else (False, "")
             log_heard(text, matched, "awake" if awake else "idle", time.time() - t0)
@@ -1678,7 +1723,13 @@ def voice_loop():
         except KeyboardInterrupt:
             break
         except Exception as ex:
-            log("voice loop error:", repr(ex)); mic.close()
+            import gb_health
+            kind = gb_health.audio_io_kind(ex, cancelling=bool(PLAY_STATE.get("cancel_gen")))
+            if kind == "cancel":
+                log("arecord interrupted during barge-in cancel")
+            else:
+                log("audio failure:" if kind != "failed" else "voice loop error:", repr(ex))
+            mic.close()
             try:
                 if not isinstance(ex, IOError): speak(f"I ran into a problem: {str(ex)[:120] or type(ex).__name__}.")
             except Exception: pass
@@ -1762,17 +1813,73 @@ def make_app():
 def run_web():
     make_app().run(WEB_HOST, WEB_PORT, threaded=True, ssl_context="adhoc" if WEB_HTTPS else None)
 
+def _health_monitor():
+    """Rosbridge freshness only. Does not open /dev/ldlidar or restart drivers.
+
+    Depth counts only after resolve_depth_scale agrees on a unit. Spoken lines
+    stay off unless HEALTH_SPEAK=1, so a sanity boot does not talk.
+    """
+    import gb_wally, gb_health
+    h = gb_wally.health()
+    speak_ok = E("HEALTH_SPEAK", "0") == "1"
+    while True:
+        lidar = {"fresh": False, "valid_frac": 0.0, "driver_ok": False, "fault": "no sample"}
+        depth = {"fresh": False, "valid_frac": 0.0, "unit_ok": False, "fault": "no sample"}
+        rgb = {"fresh": False}
+        ref_m = None
+        try:
+            scans = gb_robot.subscribe_once("/scan_raw", "sensor_msgs/LaserScan", timeout=0.8, n=1)
+            if scans:
+                msg = scans[0]
+                frame = (msg.get("header") or {}).get("frame_id") or msg.get("frame_id")
+                lidar = gb_health.lidar_status(msg.get("ranges") or [], frame)
+                ref_m = lidar.get("ref_m")
+        except Exception:
+            pass
+        try:
+            frames = gb_robot.subscribe_once("/ascamera/camera_publisher/depth0/image_raw", "sensor_msgs/Image", timeout=0.8, n=1)
+            if frames:
+                depth = gb_health.depth_status(frames[0], ref_m)
+        except Exception:
+            pass
+        try:
+            rgb_msgs = gb_robot.subscribe_once("/ascamera/camera_publisher/rgb0/image", "sensor_msgs/Image", timeout=0.4, n=1)
+            if rgb_msgs:
+                rgb = {"fresh": True}
+        except Exception:
+            pass
+        try:
+            phrases = h.update(lidar, depth, rgb)
+            gb_health.write_shared(h)
+            for line in phrases:
+                log("health:", line)
+                if line == gb_health.NO_RANGE:
+                    try:
+                        gb_wally.drop_goals("no_range")
+                    except Exception:
+                        pass
+                if speak_ok:
+                    threading.Thread(target=speak, args=(line,), daemon=True).start()
+        except Exception as ex:
+            log("health monitor:", ex)
+        time.sleep(1.0)
+
 def main():
     log(f"{BOT_NAME}: backend={LLM_BACKEND} key={'set' if has_key() else 'missing'} ollama={OLLAMA_MODEL} "
         f"STT={STT_BACKEND} TTS={TTS_BACKEND} trigger={TRIGGER} web=:{WEB_PORT} data={DATA}")
     store.write_labels_tsv()
-    try: log(f"capabilities: {gb_caps.sync()}")
+    try:
+        st = gb_caps.sync()
+        log("capabilities (fresh user gate, not a health fault): %s" % st)
+        log("banner: %s" % gb_caps.startup_banner(None, st))
     except Exception as ex: log("caps sync failed:", ex)
     threading.Thread(target=seed_watcher, daemon=True).start()
-    threading.Thread(target=lambda: tts("warm up"), daemon=True).start()
+    if E("TTS_WARMUP", "0") == "1":
+        threading.Thread(target=lambda: tts("warm up"), daemon=True).start()
     threading.Thread(target=_playback_poller, daemon=True, name="playback_poller").start()
     threading.Thread(target=estop_reactor, daemon=True, name="estop_reactor").start()
     threading.Thread(target=estop_autoclear, daemon=True, name="estop_autoclear").start()
+    threading.Thread(target=_health_monitor, daemon=True, name="health_monitor").start()
     threading.Thread(target=lambda: (resolve_audio(), stop_listener()), daemon=True, name="stop_listener").start()
     threading.Thread(target=gb_estop.warm_up, daemon=True).start()
     if TRIGGER == "none":

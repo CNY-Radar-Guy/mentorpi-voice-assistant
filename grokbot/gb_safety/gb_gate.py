@@ -138,11 +138,21 @@ class Gate(Node):
         self.cam_k = (m.k[0], m.k[4], m.k[2], m.k[5])
 
     def on_depth(self, m):
-        if self.cam_k is None or m.encoding not in ("16UC1", "mono16"): return
+        if self.cam_k is None or m.encoding not in ("16UC1", "mono16", "32FC1"): return
         try:
             import numpy as np
-            img = np.frombuffer(bytes(m.data), dtype=np.uint16).reshape(m.height, m.step // 2)[:, :m.width]
-            self.fz.on_depth(OB.depth_analyze(img, *self.cam_k, t=time.time()))
+            if m.encoding == "32FC1":
+                img = np.frombuffer(bytes(m.data), dtype=np.float32).reshape(m.height, m.step // 4)[:, :m.width]
+                raw = img[::16, ::16].ravel()[:200]
+            else:
+                img = np.frombuffer(bytes(m.data), dtype=np.uint16).reshape(m.height, m.step // 2)[:, :m.width]
+                raw = img[::16, ::16].ravel()[:200]
+            lidar_m = self.front if self.front is not None and math.isfinite(self.front) else None
+            scale, how = OB.resolve_depth_scale(m.encoding, raw, lidar_m)
+            if not scale:
+                self.log_throttle("depth unit unconfirmed (%s, %s); not used for range" % (m.encoding, how), 10.0)
+                return
+            self.fz.on_depth(OB.depth_analyze(img, *self.cam_k, t=time.time(), scale_m=scale))
         except Exception as ex:
             self.log_throttle("depth frame failed: %s" % ex, 10.0)
 
@@ -176,9 +186,9 @@ class Gate(Node):
         _t, sensor, why = ev
         if sensor == "imu-tilt-hard":                             # > 25 deg pitch or roll: zero + latch, no back-off
             self.tilt_latch(why, src); self.fz.reset_detectors(); return True
-        # Soft contacts (jolt / stall / soft tilt): never latch ESTOP. Tip-over (>25 deg) already handled above.
-        # Skip reverse backoff on IMU jolt — carpet vibration was causing thrash; explore / driver renegotiates.
-        soft = sensor.startswith("imu")  # imu / imu-tilt (not imu-tilt-hard)
+        # 15-25 deg tilt stops with no back-off. Hard tip (>25) already latched above.
+        # Skip reverse backoff on any IMU event (jolt or tilt).
+        soft = sensor.startswith("imu")  # imu / imu-tilt: no back-off
         fwd = self.lin > 0 and not soft
         self.trip("bump detected (%s): %s" % (sensor, why), src); self.finish("BUMP (%s): %s" % (sensor, why))
         self.fz.reset_detectors()
@@ -315,6 +325,23 @@ class Gate(Node):
                 time.sleep(0.5)
 
     # ------------------------------------------------------------ core
+    def _no_range_blocks_autonomy(self):
+        """Fail closed for every non-joystick source when health is missing, stale, or not a validated range.
+
+        Joystick teleop is the only source left through. Estop, tip, battery, deadman,
+        and the watchdog still apply to it and are handled elsewhere in tick.
+        """
+        try:
+            import gb_health
+            snap = gb_health.read_shared()
+            block = gb_health.gate_blocks_autonomy(self.src, self.mode, snap)
+        except Exception:
+            block = self.mode != "idle" and self.src != "joystick"
+        if not block:
+            return False
+        self.finish("autonomous refused: health monitor missing, stale, or no validated range")
+        return True
+
     def tilt_latch(self, why, src):
         """Hard tilt: ESTOP_REQ -> gb_safety_run.sh mirror writes the HOST latch (data/ESTOP, same as voice / clap),
         container ESTOP written too so this gate and the watchdog hold zero immediately."""
@@ -346,6 +373,19 @@ class Gate(Node):
                      % (why, was, (now - self.t_start) if was != "idle" else 0.0, ZERO_HOLD))
 
     def tick(self):
+        t0 = time.perf_counter()
+        try:
+            self._tick_locked()
+        finally:
+            dt_ms = (time.perf_counter() - t0) * 1000.0
+            if dt_ms >= 15.0:
+                try:
+                    import gb_health
+                    gb_health.note_control_ms(dt_ms)
+                except Exception:
+                    pass
+
+    def _tick_locked(self):
         now = time.time()
         with self.lock:
             e = os.path.exists(ESTOP)
@@ -356,6 +396,8 @@ class Gate(Node):
             if self.estop:
                 if now - self.last_zero >= 0.09:
                     self.send(0.0, 0.0); self.last_zero = now
+                return
+            if self._no_range_blocks_autonomy():
                 return
             # joystick feeds the stream path (same deadman + caps)
             j = self.joy

@@ -1,0 +1,17 @@
+[Unit]
+Description=Wally LAN camera overlay (does not own port 8080)
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/grokbot
+Environment=STREAM_BIND=192.168.50.125
+Environment=STREAM_PORT=8081
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/pi/grokbot/venv/bin/python /home/pi/grokbot/gb_stream.py
+Restart=no
+Nice=15
+
+[Install]
+WantedBy=multi-user.target

@@ -24,11 +24,11 @@ def run(pitch, roll, secs=1.0, moving=True, noise=0.0, seed=1):
 def final(k): return k[-1] if k else None
 for ax_name, mk in (("pitch", lambda d: (d, 0)), ("roll", lambda d: (0, d))):
     for sgn in (1, -1):
-        for deg, want in ((10, None), (14, None), (16, None), (18, None), (21, "tilt"), (24, "tilt"), (26, "tilt_hard"), (30, "tilt_hard"), (45, "tilt_hard")):
+        for deg, want in ((10, None), (14, None), (16, "tilt"), (18, "tilt"), (21, "tilt"), (24, "tilt"), (26, "tilt_hard"), (30, "tilt_hard"), (45, "tilt_hard")):
             k, im = run(*mk(sgn * deg))
             check("%s %+d deg -> %s" % (ax_name, sgn * deg, want), final(k) == want, (final(k), im.last))
             if want == "tilt": check("%s %+d never latches" % (ax_name, sgn * deg), "tilt_hard" not in k)
-for p, r, want in ((20, 20, "tilt_hard"), (15, 15, None), (10, 10, None), (-21, 21, "tilt_hard"), (24, 5, "tilt"), (26, -26, "tilt_hard"), (5, -26, "tilt_hard")):
+for p, r, want in ((20, 20, "tilt_hard"), (15, 15, "tilt"), (10, 10, None), (-21, 21, "tilt_hard"), (24, 5, "tilt"), (26, -26, "tilt_hard"), (5, -26, "tilt_hard")):
     k, im = run(p, r); check("combined p%+d r%+d -> %s" % (p, r, want), final(k) == want, (final(k), im.last))
 # timing: hard cutoff fires within 0.6 s of a step to 26 / 30 deg
 for deg, tmax in ((26, 0.6), (30, 0.5)):
@@ -75,7 +75,7 @@ l, a, why, kind = f.limit(0.12, 0, 100.0); check("stale IMU caps 0.06, no stop",
 gate = open(os.path.join(ROOT, "gb_safety", "gb_gate.py")).read() if os.path.exists(os.path.join(ROOT, "gb_safety", "gb_gate.py")) else None
 if gate is not None:
     check("gate hard tilt -> tilt_latch", 'sensor == "imu-tilt-hard"' in gate and "def tilt_latch" in gate and "ESTOP_REQ" in gate)
-    check("gate tilt no back-off", 'not sensor.startswith("imu-tilt")' in gate)
+    check("gate tilt no back-off", 'sensor.startswith("imu")' in gate and "no back-off" in gate)
     run_sh = open(os.path.join(ROOT, "gb_safety", "gb_safety_run.sh")).read()
     check("run.sh mirrors ESTOP_REQ to host latch", 'ESTOP_REQ' in run_sh and '"$HOST_ESTOP"' in run_sh)
 print("test_tilt: %d passed, %d failed" % (OK, BAD))

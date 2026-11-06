@@ -10,6 +10,7 @@
 !**/*.env.example
 grokbot.env
 guard.env
+secrets.env
 *credentials*
 *secret*
 *.pem

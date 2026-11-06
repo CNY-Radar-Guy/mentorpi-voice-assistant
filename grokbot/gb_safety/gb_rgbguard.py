@@ -37,7 +37,9 @@ def hazard_from(dets, w, h):
         if lab not in HAZ or cf < CONF: continue
         cx = (x1 + x2) / 2.0; area = (x2 - x1) * (y2 - y1) / float(w * h)
         if 0.25 * w <= cx <= 0.75 * w and y2 >= 0.55 * h and area >= 0.04:
-            if best is None or area > best["area"]: best = {"label": lab.replace("_", " "), "conf": round(cf, 2), "area": round(area, 3)}
+            if best is None or area > best["area"]:
+                best = {"label": lab.replace("_", " "), "conf": round(cf, 2), "area": round(area, 3),
+                        "box": [round(float(x1), 1), round(float(y1), 1), round(float(x2), 1), round(float(y2), 1)]}
     return best
 
 class RgbGuard(Node):
@@ -90,10 +92,17 @@ class RgbGuard(Node):
             try:
                 img = np.frombuffer(bytes(m.data), dtype=np.uint8).reshape(m.height, m.width, 3)
                 if m.encoding == "rgb8": img = img[:, :, ::-1]
+                frame_t = self.img_t
                 t0 = time.time(); dets = self.detect(img); ms = (time.time() - t0) * 1000
                 hz = hazard_from(dets, m.width, m.height)
-                d = {"t": time.time(), "hazard": bool(hz), "ms": round(ms), "n": len(dets)}
+                people = [dt for dt in dets if dt[0] == "person"]
+                d = {"t": frame_t, "hazard": bool(hz), "ms": round(ms), "n": len(dets), "wh": [m.width, m.height]}
                 if hz: d.update(hz)
+                if people:
+                    lab, cf, x1, y1, x2, y2 = max(people, key=lambda r: r[1])
+                    d["person"] = {"t": frame_t, "conf": round(float(cf), 2),
+                                   "box": [round(float(x1), 1), round(float(y1), 1), round(float(x2), 1), round(float(y2), 1)],
+                                   "wh": [m.width, m.height]}
                 with open(OUT + ".tmp", "w") as f: json.dump(d, f)
                 os.replace(OUT + ".tmp", OUT)
             except Exception as ex:

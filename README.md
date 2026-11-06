@@ -12,7 +12,7 @@ The tree under `grokbot/` matches `~/grokbot` on the robot, so a checkout can be
 
 Everything below is implemented in this tree.
 
-**Wake word.** The microphone stays open. Say **wake up G-Bot** (the matcher also accepts a few close variants such as "hey grok"). The [WonderEcho Pro](https://docs.hiwonder.com/projects/MentorPi-T1/en/latest/docs/1.getting_ready.html) fallback phrase is the module's factory wake word, **Hello Hiwonder**, which arrives as a serial packet. After the wake acknowledgement ("Yes?") there is a follow-up window so the next sentence does not need the wake phrase again.
+**Wake word.** The software phrase is exactly **wake up Wally** (capitalization and punctuation do not matter). **Hello Wally**, **Hey Wally**, and a bare "Wally" are not wakes, including through a fuzzy or anywhere-token match. Older G-Bot phrases still match only when the sentence does not mention Wally. The [WonderEcho Pro](https://docs.hiwonder.com/projects/MentorPi-T1/en/latest/docs/1.getting_ready.html) factory firmware phrase **Hello Hiwonder** is a separate hardware trigger on its serial port. This project does not flash that chip, and a successful software phrase is not a change to the hardware keyword. Spoken acceptance of "wake up Wally" on the robot has not been run from this tree. After the acknowledgement ("Hello John, are you ready to rock and roll?") there is a follow-up window.
 
 **Speech.** Idle listening, the wake phrase, barge-in, and safety phrases are transcribed on the Pi with faster-whisper (default `base.en`). A second Whisper instance listens while the robot is speaking, thinking, or moving, so "stop" is not stuck behind the main loop. Cloud speech-to-text (xAI `grok-voice-transcribe-2.0`) is optional: set `STT_BACKEND=xai`. The default is `local`, including for the command that follows a wake. Speech out is [Piper](https://github.com/rhasspy/piper) (default voice `en_US-lessac-medium`). An xAI TTS voice is available with `TTS_BACKEND=xai`.
 
@@ -137,7 +137,7 @@ Charge with the kit charger. Hiwonder's guide says to recharge under about 6.4 V
 
    `gb_safety/install.sh` is the on-robot installer used when this stack was first deployed. It copies `gb_safety/src/*.py` over the live modules, points the mic at `gbmic`, and installs the gate, watchdog, and clap units. On a fresh copy the files are already current, so the `cp` above is enough. `revert.sh` restores `*.bak-estop` copies on a Pi that ran `install.sh`. Those backups are not in this repository.
 
-6. **Speaker and microphone.** Plug in the WonderEcho (and a USB speaker if playback is a different card). `grokbot.service` is in the `audio` group. Say "wake up G-Bot". The startup line is "Hi, I'm Grok Bot. Say wake up G-Bot to wake me." Set `STARTUP_GREETING=` to an empty value for a silent boot.
+6. **Speaker and microphone.** Plug in the WonderEcho (and a USB speaker if playback is a different card). `grokbot.service` is in the `audio` group. The software wake phrase is "wake up Wally". Startup stays quiet unless `STARTUP_GREETING` is set. The phone overlay, when started, listens on port **8081** and leaves port **8080** for the existing snapshot server used by vision.
 
 7. **Enable motion only after a stationary check.** With the rover on a stand or blocked up, set `ALLOW_MOTION=1`, restart `grokbot`, and confirm "stop" latches the tracks before any free-floor drive. Set `LOWV_DRY_RUN=0` only after the spoken battery warning is the one you want.
 
@@ -209,8 +209,9 @@ The host never publishes a non-zero command straight to the controller. `gb_robo
 
 | You say | Result |
 | --- | --- |
-| wake up G-Bot | Software wake. The robot says "Yes?" |
-| Hello Hiwonder | WonderEcho hardware wake, when that module is plugged in |
+| wake up Wally | Software wake only. Acknowledgement: "Hello John, are you ready to rock and roll?" |
+| Hello Wally / Hey Wally / Wally | Not a wake |
+| Hello Hiwonder | WonderEcho hardware wake only, when that module is plugged in. Firmware is unchanged |
 | stop, halt, freeze, emergency stop | Track lock, even mid-sentence. No wake word. |
 | resume, okay go | Clears the lock. Motion does not resume by itself. |
 | *(two claps)* | Same lock, from `gb-clap` |
