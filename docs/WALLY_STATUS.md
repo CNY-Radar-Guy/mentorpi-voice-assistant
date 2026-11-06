@@ -1,6 +1,6 @@
 # Wally integration status
 
-Not deployed. The phone page on port 8080 is not ready, and `web_video_server` has not been moved. Full readiness stays blocked until the parent runs the reviewed activation on the Pi and the checks below pass there.
+Not deployed. The phone page on port 8080 is not ready, and `web_video_server` has not been moved. Apply stages a release directory and does not replace the modules the running voice imports. A process changes version only when its own drop-in is installed.
 
 ## Live mount, 2026-11-06 5:49 PM ET
 
@@ -29,17 +29,18 @@ Root was about 88% used with 6.6 GB free. The archive excludes data, models, voi
 | LiDAR / depth health speech | Monitor code exists. Depth is not an autonomous range until the unit is `crosscheck_mm`, `crosscheck_m`, or `32FC1_metres` and coverage is at least half the samples. | Synthetic samples | Live sensors were healthy at 10 Hz and 12 Hz. This tree has not announced the phrases on the speaker. |
 | User LiDAR off switch | A boolean `lidar: false` in caps.json is kept. Malformed JSON is not rewritten to on. | Unit test | Live caps were both true. This archive does not write caps.json. |
 | Object teaching | `gb_wally.handle` calls the teacher. `grokbot_voice.main` installs a capture that decodes `gb_robot.snapshot()` (the existing JPEG URL). | Synthetic images, plus a source check that main installs that capture | Not spoken. A failed snapshot does not save an object. |
-| Pointed mission | `PointMission` is ticked by the voice runtime while a mission is active, and a non-zero step is sent to the gate. A target needs one fresh measured depth, confidence at least 0.55, and no model caption. Map coordinates are kept only when the observation already has them. Return without a pose fix stops. The Nav2 action client is not opened. | Synthetic ticks and `ground_observation` | Not driven. No live candidate file was attached. |
 | Speech cadence | The voice loop calls `gb_cadence.observe`. Piper `tts()` uses `current_scale()`. The xAI TTS body has no speed field, so a cloud voice does not change rate. | Numeric test | Not spoken. |
-| 2 m follow | `FollowLoop` stays active and is stepped every 0.2 s by the voice runtime. It cancels on loss, low confidence, ambiguity, stale depth, timeout, estop, and the maintenance lock. It does not invent a range. | Loop tests | Not driven. Nothing in this tree writes a metric `PERSON_TRACK_FILE` yet. |
-| Phone overlay | `gb_stream.py` would listen on 8081. `gb_front.py` would forward `/` there and `/snapshot?topic=` to a snapshot upstream, only when 8080 is free and that upstream already returns a JPEG. | Decision tests | 8080 is unmet. Both units stay inactive. Not viewed on a phone. |
+| 2 m follow | `FollowLoop` steps every 0.2 s. A follow request writes `demand.json` first, so `gb_rgbguard` subscribes before the gate is moving and writes `person_track.json` from the same YOLOv8n pass plus depth. Mono16 is used only when the health file has a cross-checked unit. "I am John" does not select a person. | Geometry tests | Not driven. The container has not been restarted onto this code. |
+| Pointing | Wrist-to-index geometry is in `gb_metric.py`. The hand landmarker is loaded only when MediaPipe and the documented task file are present. Otherwise the point file says unavailable and no target is invented. | Geometry test and the missing-model result | The model is not installed by this archive. `deploy/container_ready.sh` prints the install commands. |
+| Pointed mission | A goal is sent only through `NavigateToPose` (`gb_nav.py`) after a measured map pose. Ticks publish zero velocity. No server, no map pose, or a lost fix cancels. Old status files are not reloaded as motion. | Scripted action client | The live Nav2 server was not called. |
+| Health publisher | `gb_health_node.py` and `gb-health.service` write `/home/ubuntu/shared/gb_safety/health.json` using `resolve_depth_scale`. The unit is not enabled by apply. | Record test | Not started on the Pi. |
 | Safety service wiring | Launchers copy only after live `.Mounts` match. A fast path exists for the activation window. | Stale-bind versus live-mount tests | Live units are already active. Apply does not restart them. |
 
 Unit tests are not acceptance.
 
 ## Measurements on this workspace, not the Pi
 
-`python3 grokbot/tests/test_policy.py` — 39 passed, 0 failed. `python3 grokbot/tests/test_handoff.py` — 57 passed, 0 failed. `python3 grokbot/tests/test_wally.py` — 130 passed, 0 failed. `python3 grokbot/tests/test_autoclear.py` — 18 passed, 0 failed. This run's simulated loop medians were idle 0.000090 s, push 0.000097 s, draw 0.000104 s.
+`python3 grokbot/tests/test_release.py` — 24 passed, 0 failed. `python3 grokbot/tests/test_policy.py` — 39 passed, 0 failed. `python3 grokbot/tests/test_wally.py` — 114 passed, 0 failed. `python3 grokbot/tests/test_handoff.py` — 57 passed, 0 failed. `python3 grokbot/tests/test_autoclear.py` — 18 passed, 0 failed. This run's simulated loop medians were idle 0.000102 s, push 0.000099 s, draw 0.000106 s.
 
 A simulated 5 ms loop, 30 iterations, printed median iteration time. Earlier runs:
 
@@ -61,7 +62,11 @@ That is a dry run. It does not copy and does not restart anything.
 
 `WALLY_DEPLOY_APPLY=1 deploy/wally_deploy.sh`
 
-Apply copies host modules, writes the backup path to `~/grokbot/.wally-last-code-backup`, migrates only `WAKE_*` lines, and sets `ESTOP_AUTOCLEAR_S=0` with its own backup. It does not change `WAKE_ACK` or `STARTUP_GREETING`. The live file has both of those empty. Safety files stay in place when live `.Mounts` show `/home/pi/docker/tmp` -> `/home/ubuntu/shared`. If that check fails, those safety files are put back from the backup just taken. Apply does not restart services, does not play audio, and does not write `secrets.env` or `caps.json`.
+Apply copies the tree to `~/grokbot/releases/<id>/` and leaves the live `*.py` files in place. It does not edit `grokbot.env`, does not change pins, and does not restart services.
+
+`WALLY_ACTIVATE=1 WALLY_RELEASE=<id> deploy/wally_activate.sh`
+
+Activation holds zero Twist, writes the maintenance lock, points only `gb-gate` and `gb-watchdog` at that release, and restarts them. After both are up it sets `SUPPRESS_STARTUP_SPEECH=1` and `ESTOP_AUTOCLEAR_S=0` (with a backup) and restarts `grokbot` onto the same release. If the voice process does not come back, the previous unit is restarted. `data/ESTOP` and the maintenance lock are not deleted. Other services keep their existing units, so a crash does not upgrade them.
 
 ## Activation
 

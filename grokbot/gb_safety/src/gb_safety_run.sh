@@ -8,6 +8,7 @@ set -u
 WHAT=${1:-gate}
 C=MentorPi
 GB=/home/pi/grokbot
+TREE=${GB_TREE:-$GB}                            # a release dir when activation pinned this process
 SH=/home/pi/docker/tmp/gb_safety                 # = /home/ubuntu/shared/gb_safety in the container
 HOST_ESTOP=$GB/data/ESTOP
 # Live .Mounts only. HostConfig.Binds still names docker_ros2/share/tmp and those paths do not exist.
@@ -38,10 +39,20 @@ if ! python3 "$GB/mount_check.py" --inspect "$MOUNTS_JSON" --mountinfo "$INFO_FI
 fi
 rm -f "$MOUNTS_JSON" "$INFO_FILE"
 mkdir -p "$SH" "$GB/data"
-cp -f "$GB/gb_safety/gb_$WHAT.py" "$SH/gb_$WHAT.py"
-cp -f "$GB/gb_obstacle.py" "$SH/gb_obstacle.py"            # 2026-11-05: obstacle fusion shared by gate + explore
-cp -f "$GB/gb_health.py" "$SH/gb_health.py"                # ranging mode for autonomous vs teleop
-cp -f "$GB/gb_maint.py" "$SH/gb_maint.py"                  # maintenance lock, not the ESTOP timer
+if [ "$WHAT" = "health" ]; then
+  cp -f "$TREE/gb_health_node.py" "$SH/gb_health_node.py"
+  cp -f "$TREE/gb_health.py" "$SH/gb_health.py"
+  cp -f "$TREE/gb_obstacle.py" "$SH/gb_obstacle.py"
+else
+  cp -f "$TREE/gb_safety/gb_$WHAT.py" "$SH/gb_$WHAT.py"
+fi
+cp -f "$TREE/gb_obstacle.py" "$SH/gb_obstacle.py"
+cp -f "$TREE/gb_health.py" "$SH/gb_health.py"
+cp -f "$TREE/gb_maint.py" "$SH/gb_maint.py"
+cp -f "$TREE/gb_metric.py" "$SH/gb_metric.py" 2>/dev/null || true
+cp -f "$TREE/gb_demand.py" "$SH/gb_demand.py" 2>/dev/null || true
+cp -f "$TREE/gb_hands.py" "$SH/gb_hands.py" 2>/dev/null || true
+cp -f "$TREE/gb_nav.py" "$SH/gb_nav.py" 2>/dev/null || true
 NICE=""
 if [ "$WHAT" = rgbguard ]; then
   cp -f "$GB/models/yolov8n.onnx" "$SH/yolov8n.onnx"; NICE="nice -n 12"   # advisory only: never starve the safety loop

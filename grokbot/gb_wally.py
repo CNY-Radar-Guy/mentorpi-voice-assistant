@@ -288,6 +288,11 @@ def handle(text, protections=None):
                 track = dict(track, conf=track.get("conf"))
         else:
             track = read_person_track(os.environ.get("PERSON_TRACK_FILE", ""))
+        try:
+            import gb_demand
+            gb_demand.write_demand(os.environ.get("GB_DEMAND_FILE", "/home/pi/docker/tmp/gb_safety/demand.json"), "follow")
+        except Exception:
+            pass
         fl = follow_loop()
         now = time.time()
         fl.start(now)

@@ -127,6 +127,7 @@ class PointMission(object):
         self.epoch = None
         self._t_phase = 0.0
         self._dwell_left = 0.0
+        self._nav_sent = False
         self.transport = None
         self.use_nav2 = False
 
@@ -222,27 +223,37 @@ class PointMission(object):
             say = "The way ahead is unknown, so I won't drive."
             self.speech.append(say)
             return {"ok": False, "say": say}
+        measured = _finite(c.get("x")) and _finite(c.get("y"))
+        nav_ready = self.transport is not None and getattr(self.transport, "ready", lambda: False)()
+        if not measured or not obs.get("tf_ok") or not obs.get("localized") or not nav_ready:
+            self.phase = "idle"
+            self.goal = None
+            say = "I won't drive toward that without a measured map pose and navigation."
+            self.speech.append(say)
+            self._status("refused")
+            return {"ok": False, "say": say}
+        goal = navigate_to_pose_goal(c["x"], c["y"], frame="map")
+        # Stop short of contact: the planner goal is the measured point, and the
+        # mission cancels if a later depth sample is inside CONTACT_STOP_M.
+        if not self.transport.send(goal):
+            self.phase = "idle"
+            say = "Navigation did not accept the goal, so I won't drive."
+            self.speech.append(say)
+            return {"ok": False, "say": say}
+        self.nav_goals.append(goal)
         self.goal = {
             "name": target_name,
             "dwell_s": max(0.0, float(dwell_s)),
             "start": dict(obs.get("start") or {"x": 0, "y": 0, "yaw": 0}),
             "person_id": (obs.get("person") or {}).get("track_id"),
-            "tx": c.get("x"), "ty": c.get("y"),
+            "tx": float(c["x"]), "ty": float(c["y"]),
         }
         self.epoch = health.goal_epoch
         self.phase = "approach"
         self._t_phase = 0.0
+        self._nav_sent = True
         self._dwell_left = self.goal["dwell_s"]
         self._status("running-not-a-goal")
-        measured = _finite(c.get("x")) and _finite(c.get("y"))
-        if (self.use_nav2 and health.mode == "lidar" and self.transport is not None and measured
-                and obs.get("tf_ok") and obs.get("localized") and not obs.get("from_llm") and not obs.get("from_vision")):
-            g = navigate_to_pose_goal(c["x"], c["y"])
-            self.nav_goals.append(g)
-            try:
-                self.transport.send(g)
-            except Exception:
-                self.nav_goals.append({"error": "nav2 send failed"})
         return {"ok": True, "say": "I'll go to the %s, wait, and come back." % target_name, "phase": "approach"}
 
     def tick(self, dt, obs, health, protections=None):
@@ -260,22 +271,26 @@ class PointMission(object):
         self._t_phase += float(dt)
         if self.phase == "approach":
             if self._t_phase > APPROACH_MAX_S:
+                self._cancel_nav()
                 self.speech.append("I took too long, so I stopped.")
                 return self.cancel("timeout")
             dist = _target_depth(obs, self.goal["name"])
-            if dist is None:
-                self.speech.append("I lost the target, so I stopped.")
-                return self.cancel("target_lost")
-            if dist <= CONTACT_STOP_M:
+            if dist is not None and dist <= CONTACT_STOP_M:
+                self._cancel_nav()
+                self.speech.append("That's inside my stop distance, so I stopped.")
+                return self.cancel("contact")
+            status = self.transport.poll() if self.transport is not None else "unavailable"
+            if status in ("unavailable", "failed", "canceled", "rejected"):
+                self.speech.append("Navigation stopped, so I stopped.")
+                return self.cancel("nav2")
+            if status == "succeeded":
                 self.phase = "dwell"
                 self._dwell_left = self.goal["dwell_s"]
-                cmd = {"lin": 0.0, "ang": 0.0, "phase": "dwell", "why": "standoff"}
+                self._t_phase = 0.0
+                cmd = {"lin": 0.0, "ang": 0.0, "phase": "dwell", "why": "nav_arrived"}
                 self.commands.append(cmd)
                 return cmd
-            lin = min(0.08, max(0.0, 0.2 * (dist - CONTACT_STOP_M)))
-            if health.mode == "depth":
-                lin *= 0.5
-            cmd = {"lin": lin * pol.scale, "ang": 0.0, "phase": "approach"}
+            cmd = {"lin": 0.0, "ang": 0.0, "phase": "approach", "why": "nav_active"}
             self.commands.append(cmd)
             return cmd
         if self.phase == "dwell":
@@ -284,70 +299,61 @@ class PointMission(object):
                 cmd = {"lin": 0.0, "ang": 0.0, "phase": "dwell", "left": self._dwell_left}
                 self.commands.append(cmd)
                 return cmd
-            person = obs.get("person") or {}
-            if person.get("fresh") and float(person.get("conf") or 0) >= PERSON_CONF and person.get("track_id") == self.goal.get("person_id") and person.get("depth_m"):
-                self.phase = "return_person"
-            else:
-                self.phase = "return_start"
-            self._t_phase = 0.0
+            self._begin_return(obs)
             cmd = {"lin": 0.0, "ang": 0.0, "phase": self.phase, "why": "dwell_done"}
             self.commands.append(cmd)
             return cmd
-        if self.phase == "return_person":
+        if self.phase in ("return_person", "return_start"):
             if self._t_phase > RETURN_MAX_S:
+                self._cancel_nav()
                 return self.cancel("timeout")
-            person = obs.get("person") or {}
-            if not person.get("fresh") or float(person.get("conf") or 0) < PERSON_CONF:
-                self.phase = "return_start"
-                self._t_phase = 0.0
-                self.speech.append("I lost you, so I'll head back to where I started.")
-            else:
-                dist = float(person.get("depth_m") or 0)
-                if dist <= 2.0:
-                    cmd = {"lin": 0.0, "ang": 0.0, "phase": "done", "why": "back_with_person"}
-                    self.phase = "idle"
-                    self.goal = None
-                    self.commands.append(cmd)
-                    self._status("done")
-                    return cmd
-                lin = min(0.08, 0.12 * (dist - 2.0))
-                cmd = {"lin": lin, "ang": 0.0, "phase": "return_person"}
-                self.commands.append(cmd)
-                return cmd
-        if self.phase == "return_start":
-            if not obs.get("localized", False) or not obs.get("tf_ok", obs.get("localized", False)):
+            if not obs.get("localized") or not obs.get("tf_ok"):
+                self._cancel_nav()
                 self.speech.append("I lost localization, so I stopped.")
                 return self.cancel("localization")
-            if self._t_phase > RETURN_MAX_S:
-                return self.cancel("timeout")
-            pose = obs.get("pose")
-            if not isinstance(pose, dict) or not (_finite(pose.get("x")) and _finite(pose.get("y"))):
-                self.speech.append("I don't have a pose fix, so I stopped.")
-                return self.cancel("tf")
-            # Without a live odometry stream the synthetic world says arrived via obs.start_arrived.
-            if obs.get("start_arrived"):
-                cmd = {"lin": 0.0, "ang": 0.0, "phase": "done", "why": "start_pose"}
+            status = self.transport.poll() if self.transport is not None else "unavailable"
+            if status in ("unavailable", "failed", "canceled", "rejected"):
+                return self.cancel("nav2")
+            if status == "succeeded":
+                why = "back_with_person" if self.phase == "return_person" else "start_pose"
+                cmd = {"lin": 0.0, "ang": 0.0, "phase": "done", "why": why}
                 self.phase = "idle"
                 self.goal = None
                 self.commands.append(cmd)
                 self._status("done")
                 return cmd
-            if self.use_nav2 and health.mode == "lidar" and self.transport is not None:
-                st = self.goal["start"]
-                g = navigate_to_pose_goal(st["x"], st["y"], st.get("yaw") or 0.0)
-                self.nav_goals.append(g)
-                try:
-                    self.transport.send(g)
-                except Exception:
-                    return self.cancel("nav2")
-            cmd = {"lin": 0.06 if health.mode == "lidar" else 0.0, "ang": 0.0, "phase": "return_start"}
-            if health.mode != "lidar":
-                # Depth fallback has no map. Do not invent a path through unknown space.
-                self.speech.append("I can't see the way back, so I stopped.")
-                return self.cancel("no_return_path")
+            cmd = {"lin": 0.0, "ang": 0.0, "phase": self.phase, "why": "nav_active"}
             self.commands.append(cmd)
             return cmd
         return self.cancel("idle")
+
+    def _cancel_nav(self):
+        if self.transport is not None:
+            try:
+                self.transport.cancel_all()
+            except Exception:
+                pass
+
+    def _begin_return(self, obs):
+        self._t_phase = 0.0
+        person = obs.get("person") or {}
+        px, py = person.get("x"), person.get("y")
+        if (person.get("fresh") and float(person.get("conf") or 0) >= PERSON_CONF
+                and _finite(px) and _finite(py) and obs.get("tf_ok")):
+            goal = navigate_to_pose_goal(px, py, frame="map")
+            self.phase = "return_person"
+        else:
+            start = self.goal.get("start") or {}
+            if not (_finite(start.get("x")) and _finite(start.get("y")) and obs.get("tf_ok")):
+                self.speech.append("I don't have a pose to return to, so I stopped.")
+                self.cancel("tf")
+                return
+            goal = navigate_to_pose_goal(start["x"], start["y"], start.get("yaw") or 0.0, frame="map")
+            self.phase = "return_start"
+        if self.transport is None or not self.transport.send(goal):
+            self.cancel("nav2")
+            return
+        self.nav_goals.append(goal)
 
 
 def _same(a, b):

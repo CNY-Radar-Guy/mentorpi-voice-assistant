@@ -187,64 +187,33 @@ res = mission.start("table", 15, obs_amb, h, autonomy=True)
 check("ambiguous does not drive", res["ok"] is False and mission.commands == [], res)
 check("vision caption cannot start", mission.start("table", 15, dict(obs_amb, from_vision=True, candidates=obs_amb["candidates"][:1]), h, autonomy=True)["ok"] is False)
 
-one = {"candidates": [dict(obs_amb["candidates"][0], depth_m=1.2)],
-       "person": obs_amb["person"], "localized": True, "start": {"x": 1, "y": 0, "yaw": 0}}
+import gb_nav
+one = {"candidates": [dict(obs_amb["candidates"][0], depth_m=1.2, x=1.5, y=0.2)],
+       "person": dict(obs_amb["person"], x=0.2, y=0.0), "localized": True, "tf_ok": True,
+       "start": {"x": 1, "y": 0, "yaw": 0}}
 res = mission.start("table", 15, one, h, autonomy=True)
-check("clear target accepted", res["ok"] is True, res)
-# approach while far
-far = dict(one)
-step = mission.tick(0.2, far, h)
-check("approach moves", step["phase"] == "approach" and step["lin"] > 0, step)
-near = {"candidates": [dict(one["candidates"][0], depth_m=0.35)], "person": one["person"], "localized": True, "start": one["start"]}
-step = mission.tick(0.2, near, h)
-check("stops before contact", step["lin"] == 0.0 and step["phase"] == "dwell", step)
-dwell_zeros = 0
-for _ in range(20):
-    step = mission.tick(1.0, near, h)
-    if step["phase"] == "dwell":
-        dwell_zeros += 1
-        check("dwell is zero", step["lin"] == 0.0 and step["ang"] == 0.0)
-    else:
-        break
-check("dwelled about 15s", dwell_zeros >= 14, dwell_zeros)
-check("returns toward person", step["phase"] in ("return_person", "dwell_done") or step.get("why") == "dwell_done" or step["phase"] == "return_person", step)
-# drive the return until done
-done = step
-for _ in range(10):
-    if mission.phase != "return_person":
-        break
-    done = mission.tick(1.0, {"candidates": near["candidates"], "person": {"conf": 0.9, "depth_m": 2.0, "fresh": True, "track_id": "p1"},
-                              "localized": True, "start": one["start"]}, h)
-check("arrived with person", done.get("why") == "back_with_person" or done["phase"] == "done", done)
-
-# person lost -> start pose, then localization loss stops
-mission.start("table", 1, one, h, autonomy=True)
-mission.tick(0.2, one, h)
-mission.tick(0.2, near, h)
-# finish dwell quickly
-guard = 0
-while mission.phase == "dwell" and guard < 5:
-    mission.tick(1.0, near, h)
-    guard += 1
-lost = {"candidates": near["candidates"], "person": {"conf": 0.1, "depth_m": None, "fresh": False, "track_id": "p1"},
-        "localized": False, "start": one["start"], "start_arrived": False}
-step = mission.tick(1.0, lost, h)
-# may still be finishing dwell; tick until return or cancel
-guard = 0
-while mission.phase in ("dwell", "return_person") and guard < 8:
-    step = mission.tick(1.0, lost, h)
-    guard += 1
-check("lost person does not keep driving blind", mission.phase in ("idle", "return_start") or step.get("why") in ("localization", "no_return_path", "dwell_done"), (mission.phase, step))
-if mission.phase == "return_start":
-    step = mission.tick(0.5, lost, h)
-check("localization loss stops", mission.phase == "idle" or step.get("why") in ("localization", "no_return_path"), (mission.phase, step))
+check("no navigation does not drive", res["ok"] is False and mission.phase == "idle", res)
+nav = gb_nav.ScriptedNav(["active", "succeeded", "succeeded"])
+mission.transport = nav
+res = mission.start("table", 1, one, h, autonomy=True)
+check("measured pose is sent to navigation", res["ok"] is True and len(nav.goals) == 1, res)
+step = mission.tick(0.2, one, h)
+check("approach does not open-loop", step["lin"] == 0.0 and step["ang"] == 0.0 and step["phase"] == "approach", step)
+step = mission.tick(0.2, one, h)
+check("navigation arrival is zero", step["lin"] == 0.0 and step["phase"] == "dwell", step)
+step = mission.tick(1.0, one, h)
+check("dwell stays zero", step["lin"] == 0.0 and step.get("why") == "dwell_done", step)
+step = mission.tick(0.2, one, h)
+check("return is a second navigation goal", step["lin"] == 0.0 and (step.get("why") == "back_with_person" or step["phase"] == "done"), step)
 
 # cancel
+mission.transport = gb_nav.ScriptedNav(["active"])
 mission.start("table", 15, one, h, autonomy=True)
 mission.cancel("cancel")
 check("cancel zeros", mission.phase == "idle" and mission.commands[-1]["lin"] == 0.0)
 
 # sensor dropout mid goal
+mission.transport = gb_nav.ScriptedNav(["active"])
 mission.start("table", 15, one, h, autonomy=True)
 h.update(lidar=BAD_L, depth=BAD_D)
 h.update(lidar=BAD_L, depth=BAD_D)

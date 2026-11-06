@@ -19,8 +19,8 @@ def seconds_arg(argv):
             i += 2
         else:
             i += 1
-    if seconds <= 0 or seconds > 8:
-        raise SystemExit("zero hold must be between 0 and 8 seconds")
+    if seconds <= 0 or seconds > 40:
+        raise SystemExit("zero hold must be between 0 and 40 seconds")
     return seconds
 
 

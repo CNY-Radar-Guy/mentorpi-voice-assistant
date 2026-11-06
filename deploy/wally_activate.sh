@@ -52,8 +52,13 @@ if ! cp -f "$ROOT/deploy/zero_hold.py" /home/pi/docker/tmp/gb_safety/zero_hold.p
   echo "activation refused. Could not stage the zero publisher on the verified mount. No safety unit was restarted."
   exit 4
 fi
-if ! docker exec -d -u ubuntu "$C" bash -lc 'source /opt/ros/humble/setup.bash; exec python3 /home/ubuntu/shared/gb_safety/zero_hold.py --seconds 4'; then
+if ! docker exec -d -u ubuntu "$C" bash -lc 'source /opt/ros/humble/setup.bash; exec python3 /home/ubuntu/shared/gb_safety/zero_hold.py --seconds 25'; then
   echo "activation refused. Zero publisher did not start. No safety unit was restarted."
+  exit 4
+fi
+REL=${WALLY_RELEASE:-}
+if [ -z "$REL" ] || [ ! -d "$DEST/releases/$REL" ]; then
+  echo "activation refused. Set WALLY_RELEASE to a staged release. No unit was restarted."
   exit 4
 fi
 
@@ -69,7 +74,17 @@ fi
 echo "maintenance lock is present. grokbot is not stopped."
 
 date +%s > "$DEST/data/ACTIVATION"
+install_dropin() {
+  local unit="$1" text="$2"
+  sudo mkdir -p "/etc/systemd/system/${unit}.service.d"
+  printf '%s\n' "$text" | sudo tee "/etc/systemd/system/${unit}.service.d/release.conf" >/dev/null
+}
 if command -v systemctl >/dev/null 2>&1; then
+  GATE_DROP=$(python3 -c "import sys; sys.path.insert(0,'$ROOT'); from deploy.release_layout import dropin_text; print(dropin_text('gate','$DEST/releases/$REL'))")
+  WD_DROP=$(python3 -c "import sys; sys.path.insert(0,'$ROOT'); from deploy.release_layout import dropin_text; print(dropin_text('watchdog','$DEST/releases/$REL'))")
+  install_dropin gb-gate "$GATE_DROP"
+  install_dropin gb-watchdog "$WD_DROP"
+  sudo systemctl daemon-reload
   start_ns=$(date +%s%N)
   sudo systemctl restart gb-gate gb-watchdog
   ok=0
@@ -87,10 +102,14 @@ if command -v systemctl >/dev/null 2>&1; then
   end_ns=$(date +%s%N)
   elapsed=$(python3 -c "print((${end_ns} - ${start_ns}) / 1e9)")
   if [ "$ok" != 1 ] || ! python3 -c "import sys; sys.exit(0 if float('$elapsed') <= 2.0 else 1)"; then
-    echo "gate/watchdog were not both up within 2 seconds (elapsed ${elapsed}s). ESTOP was not cleared. The maintenance lock was not cleared. grokbot was left running."
+    echo "gate/watchdog were not both up within 2 seconds (elapsed ${elapsed}s)."
+    sudo rm -f /etc/systemd/system/gb-gate.service.d/release.conf /etc/systemd/system/gb-watchdog.service.d/release.conf
+    sudo systemctl daemon-reload
+    sudo systemctl restart gb-gate gb-watchdog
+    echo "rolled back the gate and watchdog drop-ins. ESTOP and the maintenance lock were not removed. grokbot was not stopped."
     exit 5
   fi
-  echo "gate and watchdog python processes were visible within ${elapsed}s. grokbot was not stopped."
+  echo "gate and watchdog python processes were visible within ${elapsed}s."
 else
   echo "systemctl is not available. ESTOP was not cleared. The maintenance lock was not cleared."
   exit 5
@@ -99,8 +118,33 @@ if [ ! -e "$DEST/data/MAINT" ]; then
   echo "maintenance lock disappeared during restart. Not clearing ESTOP."
   exit 5
 fi
-echo "Voice reload is not part of this command. Spoken stop stays with the running grokbot service."
-echo "A later reload requires SUPPRESS_STARTUP_SPEECH=1 and ESTOP_AUTOCLEAR_S=0. Empty greeting fields are not that switch."
-echo "Clear the maintenance lock only after checks, with deploy/maint_clear.sh. This script does not clear it."
-echo "No follow, no readiness phrase, no port 8080 change."
+if [ -f "$DEST/grokbot.env" ]; then
+  python3 "$ROOT/deploy/migrate_wake_env.py" "$DEST/grokbot.env"
+  python3 "$ROOT/deploy/migrate_autoclear.py" "$DEST/grokbot.env"
+  if ! grep -q '^SUPPRESS_STARTUP_SPEECH=1$' "$DEST/grokbot.env"; then
+    printf '\nSUPPRESS_STARTUP_SPEECH=1\n' >> "$DEST/grokbot.env"
+  fi
+fi
+if ! python3 -c "import sys; sys.path.insert(0,'$ROOT'); from deploy.release_layout import voice_restart_env_ok; import pathlib; sys.exit(0 if voice_restart_env_ok(pathlib.Path('$DEST/grokbot.env').read_text() if pathlib.Path('$DEST/grokbot.env').is_file() else 'SUPPRESS_STARTUP_SPEECH=1\nESTOP_AUTOCLEAR_S=0\nWAKE_WORDS=wake up wally\n') else 1)"; then
+  echo "voice restart refused. Stop listener stays on the running process. ESTOP and the maintenance lock were not removed."
+  exit 5
+fi
+VOICE_DROP=$(python3 -c "import sys; sys.path.insert(0,'$ROOT'); from deploy.release_layout import dropin_text; print(dropin_text('voice','$DEST/releases/$REL'))")
+install_dropin grokbot "$VOICE_DROP"
+sudo systemctl daemon-reload
+sudo systemctl restart grokbot
+voice_ok=0
+for _ in $(seq 1 40); do
+  if systemctl is-active --quiet grokbot; then voice_ok=1; break; fi
+  sleep 0.5
+done
+if [ "$voice_ok" != 1 ]; then
+  sudo rm -f /etc/systemd/system/grokbot.service.d/release.conf
+  sudo systemctl daemon-reload
+  sudo systemctl restart grokbot
+  echo "voice did not return. The previous unit was restarted. ESTOP and the maintenance lock were not removed."
+  exit 5
+fi
+echo "voice is active again. Startup speech is suppressed. A normal stop is not cleared by this restart."
+echo "The maintenance lock remains until deploy/maint_clear.sh. No follow was started. Port 8080 was not changed."
 exit 0
