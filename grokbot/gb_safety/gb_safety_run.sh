@@ -39,23 +39,32 @@ if ! python3 "$TREE/mount_check.py" --inspect "$MOUNTS_JSON" --mountinfo "$INFO_
 fi
 rm -f "$MOUNTS_JSON" "$INFO_FILE"
 mkdir -p "$SH" "$GB/data"
-if [ "$WHAT" = "health" ]; then
-  cp -f "$TREE/gb_health_node.py" "$SH/gb_health_node.py"
-  cp -f "$TREE/gb_health.py" "$SH/gb_health.py"
-  cp -f "$TREE/gb_obstacle.py" "$SH/gb_obstacle.py"
+# State (ESTOP, MAINT, json) stays in $SH. Code for a release goes in its own folder
+# so a newer rgbguard or health start cannot overwrite the modules an older gate imports.
+if [ -n "${GB_TREE:-}" ]; then
+  REL=${GB_RELEASE:-$(basename "$TREE")}
+  CODE=/home/pi/docker/tmp/gb_code/$REL
+  CONT_CODE=/home/ubuntu/shared/gb_code/$REL
 else
-  cp -f "$TREE/gb_safety/gb_$WHAT.py" "$SH/gb_$WHAT.py"
+  CODE=$SH
+  CONT_CODE=/home/ubuntu/shared/gb_safety
 fi
-cp -f "$TREE/gb_obstacle.py" "$SH/gb_obstacle.py"
-cp -f "$TREE/gb_health.py" "$SH/gb_health.py"
-cp -f "$TREE/gb_maint.py" "$SH/gb_maint.py"
-cp -f "$TREE/gb_metric.py" "$SH/gb_metric.py" 2>/dev/null || true
-cp -f "$TREE/gb_demand.py" "$SH/gb_demand.py" 2>/dev/null || true
-cp -f "$TREE/gb_hands.py" "$SH/gb_hands.py" 2>/dev/null || true
-cp -f "$TREE/gb_nav.py" "$SH/gb_nav.py" 2>/dev/null || true
+mkdir -p "$CODE"
+if [ "$WHAT" = "health" ]; then
+  cp -f "$TREE/gb_health_node.py" "$CODE/gb_health_node.py"
+else
+  cp -f "$TREE/gb_safety/gb_$WHAT.py" "$CODE/gb_$WHAT.py"
+fi
+cp -f "$TREE/gb_obstacle.py" "$CODE/gb_obstacle.py"
+cp -f "$TREE/gb_health.py" "$CODE/gb_health.py"
+cp -f "$TREE/gb_maint.py" "$CODE/gb_maint.py"
+cp -f "$TREE/gb_metric.py" "$CODE/gb_metric.py" 2>/dev/null || true
+cp -f "$TREE/gb_demand.py" "$CODE/gb_demand.py" 2>/dev/null || true
+cp -f "$TREE/gb_hands.py" "$CODE/gb_hands.py" 2>/dev/null || true
+cp -f "$TREE/gb_nav.py" "$CODE/gb_nav.py" 2>/dev/null || true
 NICE=""
 if [ "$WHAT" = rgbguard ]; then
-  cp -f "$GB/models/yolov8n.onnx" "$SH/yolov8n.onnx"; NICE="nice -n 12"   # advisory only: never starve the safety loop
+  cp -f "$GB/models/yolov8n.onnx" "$CODE/yolov8n.onnx"; NICE="nice -n 12"   # advisory only: never starve the safety loop
 fi
 log() { echo "$(date '+%F %T') [$WHAT-run] $*"; }
 
@@ -74,7 +83,23 @@ mirror() {
         docker exec $C pkill -INT -f "gb_explore.py --nav2" 2>/dev/null
       fi
     else
-      [ -e "$SH/ESTOP" ] && rm -f "$SH/ESTOP" && log "ESTOP cleared"
+      if [ -e "$SH/ESTOP" ] && python3 - "$SH/ESTOP" <<'PY'
+import json, sys
+path = sys.argv[1]
+try:
+    body = json.load(open(path))
+except Exception:
+    sys.exit(1)
+src = body.get("src") if isinstance(body, dict) else ""
+hard = src in {"gate-tilt", "tilt", "battery", "watchdog", "physical", "joystick", "hardware"}
+sys.exit(0 if isinstance(body, dict) and (body.get("kind") == "safety" or hard) else 1)
+PY
+      then
+        cp -f "$SH/ESTOP" "$HOST_ESTOP" 2>/dev/null || true
+        log "left safety latch; host stop file kept"
+      else
+        [ -e "$SH/ESTOP" ] && rm -f "$SH/ESTOP" && log "ESTOP cleared"
+      fi
       was=0
     fi
     if [ -e "$GB/data/MAINT" ]; then
@@ -118,7 +143,10 @@ else
     exit 1
   fi
 fi
-docker exec -u ubuntu $C pkill -f "/home/ubuntu/shared/gb_safety/gb_$WHAT.py" 2>/dev/null
+NODE=gb_$WHAT.py
+[ "$WHAT" = "health" ] && NODE=gb_health_node.py
+[ "$WHAT" = "rgbguard" ] && export GB_RGB_MODEL=$CONT_CODE/yolov8n.onnx
+docker exec -u ubuntu $C pkill -f "$CONT_CODE/$NODE" 2>/dev/null
 
 MIR=""
 [ "$WHAT" = rgbguard ] || { mirror & MIR=$!; }      # one ESTOP mirror per safety node is enough
@@ -126,12 +154,12 @@ JK=""
 if [ "$WHAT" = gate ]; then
   ( while true; do docker exec $C pkill -f "peripherals/joystick_control" >/dev/null 2>&1 && log "stopped Hiwonder joystick_control (gate owns the gamepad)"; sleep 10; done ) & JK=$!
 fi
-trap 'kill $MIR $JK 2>/dev/null; docker exec -u ubuntu '$C' pkill -INT -f /home/ubuntu/shared/gb_safety/gb_'$WHAT'.py 2>/dev/null; sleep 0.15; exit 0' TERM INT
+trap 'kill $MIR $JK 2>/dev/null; docker exec -u ubuntu '$C' pkill -INT -f '$CONT_CODE'/'$NODE' 2>/dev/null; sleep 0.15; exit 0' TERM INT
 
 ENVS=()
 for v in $(compgen -e | grep -E '^(GATE_|WD_|GB_|OBS_)'); do ENVS+=(-e "$v=${!v}"); done
 docker exec -u ubuntu -e PYTHONUNBUFFERED=1 "${ENVS[@]}" $C $NICE /home/ubuntu/shared/grokbot/rosrun.sh \
-  python3 /home/ubuntu/shared/gb_safety/gb_$WHAT.py &
+  python3 $CONT_CODE/$NODE &
 CHILD=$!
 wait $CHILD
 RC=$?

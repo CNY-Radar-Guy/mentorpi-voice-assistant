@@ -311,9 +311,7 @@ class Gate(Node):
                 _t, val, typ, num = struct.unpack("IhBB", ev)
                 typ &= ~0x80
                 if typ == 1 and val and num in JOY_ESTOP_BTNS:
-                    try:
-                        with open(ESTOP, "w") as f: json.dump({"t": time.time(), "src": "joystick", "kind": "safety", "why": "button %d" % num}, f)
-                    except Exception as ex: self.log("joystick estop write failed: %s" % ex)
+                    self._write_latch(ESTOP, {"t": time.time(), "src": "joystick", "kind": "safety", "why": "button %d" % num})
                     self.estop = True; self.finish("JOYSTICK ESTOP button %d" % num)
                 elif typ == 2:
                     axes[num] = val / 32767.0
@@ -353,12 +351,25 @@ class Gate(Node):
         container ESTOP written too so this gate and the watchdog hold zero immediately."""
         d = {"t": time.time(), "src": "gate-tilt", "kind": "safety", "why": why}
         for f in (os.path.join(os.path.dirname(ESTOP), "ESTOP_REQ"), ESTOP):
-            try:
-                with open(f + ".tmp", "w") as fh: json.dump(d, fh)
-                os.replace(f + ".tmp", f)
-            except Exception as ex: self.log("tilt latch write failed %s: %s" % (f, ex))
+            self._write_latch(f, d)
         self.trip("tipping over - emergency stop latched (%s)" % why, src)
         self.estop = True; self.backoff = False; self.finish("TILT ESTOP: " + why)
+
+    def _write_latch(self, path, body):
+        """Replace a stop file while holding it, so a voice clear cannot unlink a hard fault mid-write."""
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+            try:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                os.ftruncate(fd, 0)
+                os.lseek(fd, 0, os.SEEK_SET)
+                os.write(fd, json.dumps(body).encode())
+            finally:
+                os.close(fd)
+        except Exception as ex:
+            self.log("latch write failed %s: %s" % (path, ex))
 
     def send(self, lin, ang):
         self.fz.on_cmd(time.time(), float(lin), float(ang))      # the stall / slip detectors compare against what we SENT

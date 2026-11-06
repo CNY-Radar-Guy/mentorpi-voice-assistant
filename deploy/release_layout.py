@@ -10,7 +10,7 @@ import os, shutil
 
 SKIP_DIRS = {"data", "models", "voices", "__pycache__", "releases", "run"}
 SKIP_FILES = {"secrets.env", "grokbot.env", "guard.env", "caps.json"}
-ORDER = ("gate", "watchdog", "voice")
+ORDER = ("watchdog", "gate", "voice", "rgbguard", "health")
 UNITS = {"gate": "gb-gate", "watchdog": "gb-watchdog", "voice": "grokbot",
          "rgbguard": "gb-rgbguard", "guard": "gb-guard", "health": "gb-health"}
 
@@ -70,8 +70,9 @@ def dropin_text(component, release_root):
     return (
         "[Service]\n"
         "Environment=GB_TREE=%s\n"
+        "Environment=GB_RELEASE=%s\n"
         "ExecStart=\n"
-        "ExecStart=/bin/bash %s %s\n" % (release_root, script, component)
+        "ExecStart=/bin/bash %s %s\n" % (release_root, os.path.basename(release_root.rstrip("/")), script, component)
     )
 
 
@@ -98,23 +99,29 @@ def switch_component(state, component):
     return state
 
 
-def crash_rollback(state):
-    """Restore pins for anything already switched. Voice is restarted, not left down.
+def restart_one_at_a_time(names):
+    """Recovery order. The watchdog stays up until the gate has been restored."""
+    priority = ("health", "rgbguard", "voice", "gate", "watchdog")
+    return [name for name in priority if name in set(names or [])]
 
-    ESTOP and the maintenance lock are not in the delete set.
+
+def crash_rollback(state):
+    """Restore pins for anything already switched. One restart per step.
+
+    ESTOP and the maintenance lock are not in the delete set. Gate and
+    watchdog are never restarted in the same step.
     """
     pins = dict(state.get("pins") or {})
-    restart = []
-    for name in state.get("switched") or []:
+    switched = list(state.get("switched") or [])
+    if state.get("step") == "voice" and "voice" not in switched:
+        switched.append("voice")
+    for name in switched:
         prev = (state.get("previous") or {}).get(name)
         if prev:
             pins[name] = prev
         else:
             pins.pop(name, None)
-        restart.append(name)
-    if "voice" in (state.get("switched") or []) or state.get("step") == "voice":
-        if "voice" not in restart:
-            restart.append("voice")
+    restart = restart_one_at_a_time(switched)
     return {
         "pins": pins,
         "restart": restart,
@@ -122,7 +129,33 @@ def crash_rollback(state):
         "clear_estop": False,
         "clear_maint": False,
         "zero_hold": True,
+        "paired_safety_restart": False,
     }
+
+
+def code_dir(state_dir, release_id):
+    """Private code folder. The legacy state directory is not a code target."""
+    if not release_id:
+        return state_dir
+    parent = os.path.dirname(state_dir.rstrip("/"))
+    return os.path.join(parent, "gb_code", release_id)
+
+
+def watchdog_status(maint_present, release, now):
+    return {"t": float(now), "maint": bool(maint_present), "zeroing": bool(maint_present), "release": release or ""}
+
+
+def watchdog_confirmed(body, release, now, max_age=2.0):
+    """True only for a fresh ack from this release that maintenance is held and zeros are being sent."""
+    if not isinstance(body, dict) or body.get("release") != release:
+        return False
+    if body.get("maint") is not True or body.get("zeroing") is not True:
+        return False
+    try:
+        age = float(now) - float(body["t"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return 0 <= age <= float(max_age)
 
 
 def versions_consistent(pins, running):

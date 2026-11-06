@@ -5,8 +5,10 @@
 # WALLY_ACTIVATE=1, on the Pi, as user pi:
 #   * refuses unless live .Mounts show /home/pi/docker/tmp -> /home/ubuntu/shared
 #   * writes a maintenance lock and does not create or delete data/ESTOP
-#   * publishes zero Twist, then restarts only gb-gate and gb-watchdog
-#   * leaves grokbot running so spoken stop and wake stay up
+#   * publishes zero Twist as a supplement, then restarts gb-watchdog alone
+#   * waits until that watchdog acks maintenance and is zeroing, then restarts gb-gate alone
+#   * a failure restarts only the unit that just moved; the other safety unit stays up
+#   * the running old gate is not asked to honor MAINT; the new watchdog is the inhibit until the gate moves
 #   * does not move web_video_server and does not clear the maintenance lock
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -80,36 +82,46 @@ install_dropin() {
   printf '%s\n' "$text" | sudo tee "/etc/systemd/system/${unit}.service.d/release.conf" >/dev/null
 }
 if command -v systemctl >/dev/null 2>&1; then
-  GATE_DROP=$(python3 -c "import sys; sys.path.insert(0,'$ROOT'); from deploy.release_layout import dropin_text; print(dropin_text('gate','$DEST/releases/$REL'))")
   WD_DROP=$(python3 -c "import sys; sys.path.insert(0,'$ROOT'); from deploy.release_layout import dropin_text; print(dropin_text('watchdog','$DEST/releases/$REL'))")
-  install_dropin gb-gate "$GATE_DROP"
   install_dropin gb-watchdog "$WD_DROP"
   sudo systemctl daemon-reload
-  start_ns=$(date +%s%N)
-  sudo systemctl restart gb-gate gb-watchdog
-  ok=0
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if docker exec "$C" pgrep -f /home/ubuntu/shared/gb_safety/gb_gate.py >/dev/null 2>&1 \
-       && docker exec "$C" pgrep -f /home/ubuntu/shared/gb_safety/gb_watchdog.py >/dev/null 2>&1; then
-      ok=1
-      break
+  # Old gate stays up. Only the watchdog moves onto this release.
+  sudo systemctl restart gb-watchdog
+  wd_ok=0
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    if python3 -c "import json,sys,time; from pathlib import Path; p=Path('/home/pi/docker/tmp/gb_safety/watchdog_state.json');
+b=json.loads(p.read_text()) if p.is_file() else {}; sys.exit(0 if b.get('maint') is True and b.get('zeroing') is True and b.get('release')=='$REL' and 0<=time.time()-float(b.get('t',0))<=2 else 1)" 2>/dev/null; then
+      wd_ok=1; break
     fi
-    now_ns=$(date +%s%N)
-    elapsed=$(python3 -c "print((${now_ns} - ${start_ns}) / 1e9)")
-    python3 -c "import sys; sys.exit(0 if float('$elapsed') <= 2.0 else 1)" || break
     sleep 0.2
   done
-  end_ns=$(date +%s%N)
-  elapsed=$(python3 -c "print((${end_ns} - ${start_ns}) / 1e9)")
-  if [ "$ok" != 1 ] || ! python3 -c "import sys; sys.exit(0 if float('$elapsed') <= 2.0 else 1)"; then
-    echo "gate/watchdog were not both up within 2 seconds (elapsed ${elapsed}s)."
-    sudo rm -f /etc/systemd/system/gb-gate.service.d/release.conf /etc/systemd/system/gb-watchdog.service.d/release.conf
+  if [ "$wd_ok" != 1 ]; then
+    sudo rm -f /etc/systemd/system/gb-watchdog.service.d/release.conf
     sudo systemctl daemon-reload
-    sudo systemctl restart gb-gate gb-watchdog
-    echo "rolled back the gate and watchdog drop-ins. ESTOP and the maintenance lock were not removed. grokbot was not stopped."
+    sudo systemctl restart gb-watchdog
+    echo "new watchdog did not acknowledge maintenance. Gate was not restarted. ESTOP and the maintenance lock were not removed."
     exit 5
   fi
-  echo "gate and watchdog python processes were visible within ${elapsed}s."
+  echo "watchdog is on $REL and is zeroing under the maintenance lock. The previous gate is still the one running."
+  GATE_DROP=$(python3 -c "import sys; sys.path.insert(0,'$ROOT'); from deploy.release_layout import dropin_text; print(dropin_text('gate','$DEST/releases/$REL'))")
+  install_dropin gb-gate "$GATE_DROP"
+  sudo systemctl daemon-reload
+  sudo systemctl restart gb-gate
+  gate_ok=0
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if docker exec "$C" pgrep -f "/home/ubuntu/shared/gb_code/$REL/gb_gate.py" >/dev/null 2>&1; then
+      gate_ok=1; break
+    fi
+    sleep 0.2
+  done
+  if [ "$gate_ok" != 1 ]; then
+    sudo rm -f /etc/systemd/system/gb-gate.service.d/release.conf
+    sudo systemctl daemon-reload
+    sudo systemctl restart gb-gate
+    echo "new gate did not stay up. The watchdog on $REL was left running. ESTOP and the maintenance lock were not removed."
+    exit 5
+  fi
+  echo "gate is on $REL. Watchdog and gate were not restarted together."
 else
   echo "systemctl is not available. ESTOP was not cleared. The maintenance lock was not cleared."
   exit 5
@@ -146,5 +158,23 @@ if [ "$voice_ok" != 1 ]; then
   exit 5
 fi
 echo "voice is active again. Startup speech is suppressed. A normal stop is not cleared by this restart."
-echo "The maintenance lock remains until deploy/maint_clear.sh. No follow was started. Port 8080 was not changed."
+# Detector and health come after the gate and watchdog, each alone, from this release's code folder.
+for comp in rgbguard health; do
+  DROP=$(python3 -c "import sys; sys.path.insert(0,'$ROOT'); from deploy.release_layout import dropin_text; print(dropin_text('$comp','$DEST/releases/$REL'))")
+  unit="gb-$comp"
+  if [ "$comp" = "health" ] && [ ! -f /etc/systemd/system/gb-health.service ]; then
+    sudo cp "$DEST/releases/$REL/gb_safety/gb-health.service" /etc/systemd/system/gb-health.service
+  fi
+  install_dropin "$unit" "$DROP"
+  sudo systemctl daemon-reload
+  if ! sudo systemctl restart "$unit"; then
+    sudo rm -f "/etc/systemd/system/${unit}.service.d/release.conf"
+    sudo systemctl daemon-reload
+    sudo systemctl restart "$unit" || true
+    echo "$comp did not stay on $REL. Gate and watchdog were left on that release. ESTOP and the maintenance lock were not removed."
+    exit 5
+  fi
+  echo "$comp is restarted on $REL. No other safety unit was restarted with it."
+done
+echo "The maintenance lock remains until deploy/maint_clear.sh. Port 8080 was not changed. Autonomy was not enabled."
 exit 0

@@ -98,6 +98,17 @@ class WD(Node):
         self.gate_t = time.time()
         if self.gate.get("mode") not in (None, "idle"): self.gate_moving_t = self.gate_t
 
+    def _ack_maint(self):
+        path = E("WD_STATE", "/home/ubuntu/shared/gb_safety/watchdog_state.json")
+        body = {"t": time.time(), "maint": True, "zeroing": True, "release": E("GB_RELEASE", ""), "why": "maintenance"}
+        try:
+            tmp = path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(body, f)
+            os.replace(tmp, path)
+        except OSError:
+            pass
+
     def zero(self, why, serial_ok=True):
         tw = Twist(); self.zt.publish(tw)
         if self.zm:
@@ -141,7 +152,9 @@ class WD(Node):
     def tick(self):
         now = time.time()
         if os.path.exists(MAINT):
-            self.zero("maintenance"); return
+            self.zero("maintenance")
+            self._ack_maint()
+            return
         e = os.path.exists(ESTOP)
         if e != self.estop:
             self.log("ESTOP %s" % ("LATCHED -> zero at 10 Hz" if e else "cleared"))

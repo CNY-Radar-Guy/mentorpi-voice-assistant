@@ -40,8 +40,22 @@ def info():
     except Exception: return {"src": "file", "why": "touched"} if is_set() else None
 
 def _write(path, d):
+    """Write one latch. An existing hard fault is not replaced by a normal stop."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f: json.dump(d, f)
+    payload = json.dumps(d).encode()
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        if _kind_bytes(os.read(fd, 65536)) == "safety" and d.get("kind") != "safety":
+            log("left safety latch", path)
+            return False
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(fd, payload)
+        return True
+    finally:
+        os.close(fd)
 
 _SAFETY_SRC = {"gate-tilt", "tilt", "battery", "watchdog", "physical", "joystick", "hardware"}
 
@@ -51,9 +65,16 @@ def estop(src="voice", why="", actions=None, kind=None):
     if kind is None:
         kind = "safety" if src in _SAFETY_SRC else "normal"
     d = {"t": time.time(), "ts": time.strftime("%Y-%m-%d %H:%M:%S"), "src": src, "why": why[:200], "kind": kind}
+    wrote = False
     for p in (ESTOP, SHARED_ESTOP):
-        try: _write(p, d)
-        except Exception as ex: log("estop write failed", p, ex)
+        try:
+            if _write(p, d):
+                wrote = True
+        except Exception as ex:
+            log("estop write failed", p, ex)
+    if not wrote:
+        log("ESTOP safety latch kept")
+        return False
     log("ESTOP LATCHED src=%s why=%r" % (src, why))
     _MOTION["until"] = 0.0
     threading.Thread(target=zero_now, args=("estop " + src,), daemon=True).start()
@@ -64,27 +85,51 @@ def estop(src="voice", why="", actions=None, kind=None):
         threading.Thread(target=run, daemon=True).start()
     return True
 
-def clear(src="voice", only_normal=False):
-    """Remove the ESTOP files. only_normal refuses a safety-fault latch.
+def _kind_bytes(raw):
+    if not raw or not raw.strip():
+        return "normal"
+    try:
+        body = json.loads(raw)
+    except (ValueError, TypeError):
+        return "normal"
+    if not isinstance(body, dict):
+        return "normal"
+    import gb_unlock
+    return "safety" if gb_unlock.latch_kind(body) == "safety" else "normal"
 
-    Never removes a MAINT file. Does not resume a goal.
+
+def clear(src="voice", only_normal=True):
+    """Remove a normal stop. A hard fault is never removed, and neither is MAINT.
+
+    only_normal remains for callers. False does not grant deletion of a safety
+    file. Both stop files are locked together; if either is a hard fault, neither
+    is removed.
     """
-    if only_normal:
-        try:
-            import gb_unlock
-            if gb_unlock.latch_kind(info()) == "safety":
-                log("ESTOP safety latch not cleared by", src)
+    del only_normal
+    paths = sorted(p for p in (ESTOP, SHARED_ESTOP) if p and os.path.lexists(p) and os.path.basename(p) != "MAINT")
+    if not paths:
+        return False
+    fds = []
+    try:
+        import fcntl
+        for path in paths:
+            fd = os.open(path, os.O_RDWR)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            fds.append((path, fd))
+        for path, fd in fds:
+            os.lseek(fd, 0, os.SEEK_SET)
+            if _kind_bytes(os.read(fd, 65536)) == "safety":
+                log("left safety latch", path)
                 return False
-        except Exception as ex:
-            log("latch kind check failed", ex)
-            return False
-    was = is_set()
-    for p in (ESTOP, SHARED_ESTOP):
-        try: os.remove(p)
-        except FileNotFoundError: pass
-        except Exception as ex: log("estop clear failed", p, ex)
-    if was: log("ESTOP CLEARED by", src)
-    return was
+        for path, _fd in fds:
+            os.remove(path)
+        log("ESTOP CLEARED by", src)
+        return True
+    except FileNotFoundError:
+        return False
+    finally:
+        for _path, fd in fds:
+            os.close(fd)
 
 # ------------------------------------------------------------------ gate client
 _WS = {"ws": None, "adv": set()}; _WSL = threading.Lock()
@@ -512,7 +557,9 @@ class AutoClear:
         if self.hold: return False
         if now - self.since < self.timeout: return False
         if latch_sig() != sig: return False                  # re-latched this instant: next step restarts the timer
-        clear("auto")
+        if not clear("auto"):
+            self.hold = True
+            return False
         log("ESTOP AUTO-CLEARED after %gs" % self.timeout)
         self.sig = self.since = None
         if self.on_clear:

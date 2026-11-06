@@ -1,6 +1,8 @@
 # Wally integration status
 
-Not deployed. Port 8080 stays the stock camera server. The overlay reads `http://127.0.0.1:8080/stream?topic=/ascamera/camera_publisher/rgb0/image` and, when started, serves `http://192.168.50.125:8081/stream.mjpg`. A box is drawn only from a fresh detector record. NavigateToPose is not running, `hand_landmarker.task` is not installed, `gb-health` is not enabled, and the live person detector is still the previous release until `gb-rgbguard` is restarted from this tree. Apply only stages a release. The voice drop-in sets `GB_DATA=/home/pi/grokbot/data` so a stop is written to the live latch and to `/home/pi/docker/tmp/gb_safety/ESTOP`. Launchers load `mount_check.py` from `GB_TREE`.
+Not activated. The parent reports plain video on `http://192.168.50.125:8081/stream.mjpg` at about 7 fps, 1.7% CPU, and 52 MB, with stock port 8080 untouched. Boxes are not live: the running detector is still the previous release and does not subscribe for view demand. NavigateToPose is not running. `hand_landmarker.task` is not installed. `gb-health` is not enabled. The live voice process is still the previous one, so the wake phrase and `ESTOP_AUTOCLEAR_S=15` on the robot are unchanged until activation.
+
+Apply only stages `~/grokbot/releases/<id>/`. Activation restarts the watchdog first, while the previous gate stays up, and continues to the gate only after `watchdog_state.json` says this release is holding maintenance and sending zeros. A failure restarts only the unit that just moved. Zero Twist is a supplement; it is not the inhibit for both safety processes. The previous gate and watchdog do not understand `MAINT` and are not asked to. New code is copied to `/home/pi/docker/tmp/gb_code/<id>/` (`/home/ubuntu/shared/gb_code/<id>/` in the container). `/home/ubuntu/shared/gb_safety/` stays the shared state directory and its existing Python files are not replaced. `gb_estop.clear` never removes a `kind: safety` file or `MAINT`.
 
 ## Live mount, 2026-11-06 5:49 PM ET
 
@@ -40,7 +42,7 @@ Unit tests are not acceptance.
 
 ## Measurements on this workspace, not the Pi
 
-`python3 grokbot/tests/test_release.py` — 24 passed, 0 failed. `python3 grokbot/tests/test_policy.py` — 39 passed, 0 failed. `python3 grokbot/tests/test_wally.py` — 114 passed, 0 failed. `python3 grokbot/tests/test_handoff.py` — 57 passed, 0 failed. `python3 grokbot/tests/test_autoclear.py` — 18 passed, 0 failed. This run's simulated loop medians were idle 0.000102 s, push 0.000099 s, draw 0.000106 s.
+`python3 grokbot/tests/test_safety_seq.py` — 24 passed, 0 failed. `python3 grokbot/tests/test_release.py` — 25 passed, 0 failed. `python3 grokbot/tests/test_policy.py` — 39 passed, 0 failed. `python3 grokbot/tests/test_wally.py` — 114 passed, 0 failed. `python3 grokbot/tests/test_handoff.py` — 57 passed, 0 failed. `python3 grokbot/tests/test_autoclear.py` — 18 passed, 0 failed. `python3 grokbot/tests/test_stream_jpeg.py` — 13 passed, 0 failed. This run's simulated loop medians were idle 0.000092 s, push 0.000101 s, draw 0.000104 s.
 
 A simulated 5 ms loop, 30 iterations, printed median iteration time. Earlier runs:
 
@@ -66,7 +68,7 @@ Apply copies the tree to `~/grokbot/releases/<id>/` and leaves the live `*.py` f
 
 `WALLY_ACTIVATE=1 WALLY_RELEASE=<id> deploy/wally_activate.sh`
 
-Activation holds zero Twist, writes the maintenance lock, points only `gb-gate` and `gb-watchdog` at that release, and restarts them. After both are up it sets `SUPPRESS_STARTUP_SPEECH=1` and `ESTOP_AUTOCLEAR_S=0` (with a backup) and restarts `grokbot` onto the same release. If the voice process does not come back, the previous unit is restarted. `data/ESTOP` and the maintenance lock are not deleted. Other services keep their existing units, so a crash does not upgrade them.
+Activation writes the maintenance lock, publishes zero Twist as a supplement, and restarts `gb-watchdog` alone. The previous gate keeps running. The new watchdog must write `watchdog_state.json` with this release id, `maint` true, and `zeroing` true before `gb-gate` is restarted. If the watchdog does not, only `gb-watchdog` is returned to its previous unit. If the gate does not stay up, only `gb-gate` is returned and the new watchdog is left zeroing. Voice is next, with `SUPPRESS_STARTUP_SPEECH=1` and `ESTOP_AUTOCLEAR_S=0`. `gb-rgbguard` and `gb-health` follow, one at a time, from that release's code directory, so a view demand can run the same YOLOv8n detector without a motor command. A failure of either restarts only that unit. `data/ESTOP` and the maintenance lock are not deleted. The previous gate is not asked to read `MAINT`.
 
 ## Activation
 
@@ -76,7 +78,7 @@ On the Pi, after the apply, and only if you want the safety processes reloaded:
 
 `WALLY_ACTIVATE=1 deploy/wally_activate.sh`
 
-The script writes `data/MAINT` and the shared copy, publishes zero Twist, then restarts `gb-gate` and `gb-watchdog` only. It leaves `grokbot` running so wake and the spoken stop listener stay up. It does not create or delete `data/ESTOP`. It exits with an error if both Python processes are not visible within 2 seconds. The maintenance lock stays until `WALLY_MAINT_CLEAR=1 deploy/maint_clear.sh`. A drive command and resume do not clear it. Empty `STARTUP_GREETING` is not a suppress switch; a later voice reload needs `SUPPRESS_STARTUP_SPEECH=1`. It does not play a readiness phrase, does not follow, and does not change port 8080.
+The script writes `data/MAINT` and the shared copy, publishes zero Twist, then restarts `gb-watchdog` and, only after its maintenance ack, `gb-gate`. Those two restarts are separate commands. Voice, `gb-rgbguard`, and `gb-health` follow one at a time. It does not create or delete `data/ESTOP`. A normal stop can be cleared by resume or a fresh move. A hard fault cannot, including when `clear(..., only_normal=False)` is passed. The maintenance lock stays until `WALLY_MAINT_CLEAR=1 deploy/maint_clear.sh`. Empty `STARTUP_GREETING` is not a suppress switch. It does not play a readiness phrase, does not follow, and does not change port 8080. Until this command is run on the Pi, the live timer remains 15 and the live wake process remains the previous one.
 
 ## Rollback
 
