@@ -51,8 +51,28 @@ tar -C "$ROOT/grokbot" \
   --exclude=secrets.env --exclude=grokbot.env --exclude=guard.env --exclude=caps.json \
   --exclude='*.wav' --exclude='*.bak*' \
   -cf - . | tar -C "$DEST" -xf -
-echo "code copied. previous files are not deleted from $BACK unless you archived them yourself."
-echo "rollback: restore $BACK if you copied it before this apply, or git checkout the previous tree."
+echo "code snapshot is in $BACK. This script does not delete older backup-wally directories."
+# Safety launchers assume /home/pi/docker/tmp -> /home/ubuntu/shared. The 17:44 ET
+# preflight bind list did not show that pair. Do not replace those files unless it does.
+BINDS='[]'
+if command -v docker >/dev/null 2>&1; then
+  BINDS=$(docker inspect -f '{{json .HostConfig.Binds}}' MentorPi 2>/dev/null || echo '[]')
+fi
+set +e
+python3 "$ROOT/deploy/mount_check.py" "$BINDS"
+MOUNT_RC=$?
+set -e
+if [ "$MOUNT_RC" != "0" ]; then
+  echo "SAFETY MODULES BLOCKED. Restoring launchers and injected nodes from the backup snapshot."
+  for rel in gb_safety gb_guard.py gb_guard_run.sh gb_obstacle.py gb_explore.py gb_mapping.py gb-gate.service gb-watchdog.service gb-rgbguard.service gb-guard.service gb-clap.service; do
+    if [ -e "$BACK/$rel" ]; then
+      mkdir -p "$(dirname "$DEST/$rel")"
+      rm -rf "$DEST/$rel"
+      cp -a "$BACK/$rel" "$DEST/$rel"
+    fi
+  done
+  echo "Host voice modules, if present in this tree, remain staged. Services were not restarted."
+fi
 
 if [ -f "$DEST/grokbot.env" ]; then
   python3 "$ROOT/deploy/migrate_wake_env.py" "$DEST/grokbot.env"
@@ -60,6 +80,13 @@ else
   echo "no grokbot.env to migrate; code defaults apply and secrets.env was not touched"
 fi
 
-echo "not restarting grokbot, gb-gate, or gb-stream."
-echo "overlay unit is gb-stream.service (port 8081, Restart=no). Do not point it at 8080 while the snapshot server is healthy."
-echo "enable it only after you choose to: sudo cp $DEST/gb-stream.service /etc/systemd/system/ && sudo systemctl daemon-reload"
+echo "not restarting grokbot, gb-gate, gb-watchdog, gb-guard, gb-rgbguard, or web_video_server."
+python3 - << PY
+import sys
+sys.path.insert(0, "$ROOT/grokbot")
+import gb_front
+# The 17:44 ET sample: 8080 is bound. Do not probe /snapshot with an empty topic.
+print(gb_front.preflight_decision(True, snapshot_without_topic_empty=True, upstream_snapshot_jpeg=False)["reason"])
+PY
+echo "Phone URL http://192.168.50.125:8080/ is unmet while web_video_server owns 8080. gb-stream and gb-front stay inactive."
+echo "Rollback: deploy/wally_rollback.sh $BACK"

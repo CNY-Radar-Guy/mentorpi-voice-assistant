@@ -1,40 +1,56 @@
 # Wally integration status
 
-This file is the acceptance matrix for the tree on this branch. It is not a claim that the robot has been driven or that speech has been heard.
+Not ready to test on the robot. The 2026-11-06 17:44 ET preflight is a constraint on this handoff. Nothing in that preflight was changed on the Pi.
 
-## Software wake
+Port 8080 is owned by stock `web_video_server` (pid 4830, user pi, inside the MentorPi container, host network, `0.0.0.0:8080`). HEAD `/` returned HTML 200. A GET of `/snapshot` with no `topic` query was empty. That does not mean the endpoint is missing: `gb_robot.snapshot()` calls `http://127.0.0.1:8080/snapshot?topic=` plus the camera topic and requires JPEG bytes (`FFD8`). No TCP clients in that sample does not mean nothing uses the port. This tree does not stop that process and does not move it. The phone URL `http://192.168.50.125:8080/` is unmet. `gb-stream` and `gb-front` stay inactive (`enable_stream` false, `Restart=no`). Port 8081 was free. It is only a low-priority overlay, and only if a later preflight finds 8080 free and a JPEG snapshot upstream already answering. Until then the overlay is not started.
 
-The software phrase is exactly `wake up Wally`. Case and punctuation are ignored. `Hello Wally`, `Hey Wally`, `Hi Wally`, and a bare `Wally` are rejected, including when a leftover allow-list contains `wally` or a fuzzy window is close to the real phrase.
+`rclpy` is not installed for host Python. It imports inside the container. New ROS nodes have to use the existing `docker exec` wrapper and the rclpy wait in `gb_safety_run.sh`. Do not start them with host `python3`.
 
-`Hello Hiwonder` is only the WonderEcho Pro factory firmware packet. Nothing in this tree flashes that device. A passing unit test is not spoken acceptance on the robot.
+The bind list in that preflight showed `/home/pi/docker_ros2/tmp` mounted at `/home/ubuntu/share/tmp` (`share`, not `shared`). The safety launchers still name `/home/pi/docker/tmp` and `/home/ubuntu/shared`. Those strings are not a mount. `deploy/mount_check.py` refuses a safety-module copy unless that exact pair is in `docker inspect`. `wally_deploy.sh` then puts the previous launchers and injected nodes back from the backup it just took. It does not restart services and does not delete older `backup-wally-*` directories. Root was about 88% used with 6.6 GB free. The archive excludes data, models, voices, and wavs so it does not copy that bulk.
 
-`deploy/migrate_wake_env.py` rewrites only `WAKE_WORDS`, `WAKE_ANYWHERE`, and `WAKE_PROMPT` in an existing env file, after writing a timestamped backup. It leaves `WAKE_ACK` and every other line, including keys, alone. It refuses `secrets.env`.
+## Feature matrix
 
-## Autonomous health
+| Feature | In this tree | Exercised here | On the robot |
+| --- | --- | --- | --- |
+| Wake phrase exactly "wake up Wally" | Yes. Hello/Hey/bare Wally rejected in `gb_wally.classify_wake`, even if the env allow-list still contains `wally`. | Unit tests | Not spoken. WonderEcho firmware is still Hello Hiwonder and was not flashed. |
+| "I am John" | Not authentication. | Unit test | Not spoken. |
+| Emergency stop | Existing latch, phrases, clap, tip, watchdog. Not bypassed by teleop. | Phrase tests and policy tests | Already active on the Pi. This archive does not restart it. |
+| Autonomous drive | Default off (`ALLOW_AUTONOMY=0`). Gate fails closed without a fresh validated health file. Joystick is the only teleop source. | Unit tests of the policy | Not accepted. Do not enable it for these checks. |
+| LiDAR / depth health speech | Monitor code exists. Depth is not an autonomous range until the unit is `crosscheck_mm`, `crosscheck_m`, or `32FC1_metres` and coverage is at least half the samples. | Synthetic samples | Live sensors were healthy at 10 Hz and 12 Hz. This tree has not announced the phrases on the speaker. |
+| User LiDAR off switch | A boolean `lidar: false` in caps.json is kept. Malformed JSON is not rewritten to on. | Unit test | Live caps were both true. This archive does not write caps.json. |
+| Object teaching | Multi-turn SQLite and a perceptual hash in `gb_teach.py`, reached from `gb_wally.handle` after the exact wake. | Synthetic images | No camera capture and no spoken confirmation. |
+| Pointed mission | State machine in `gb_point.py`. Ambiguous targets do not drive. Goals are not reloaded as motion. Nav2 is a goal dict plus an optional transport, not a proven plan on this map. | Synthetic ticks | No motion, no localization, no person track. |
+| Speech cadence | `gb_cadence.py` maps words-per-second to a Piper length scale. | Numeric test | Piper was not run. |
+| 2 m follow | `gb_follow.py` speed command. Stops inside 1.5 m. No range means no motion. | Synthetic ranges | Not wired to a live track and not driven. |
+| Phone overlay | `gb_stream.py` would listen on 8081. `gb_front.py` would forward `/` there and `/snapshot?topic=` to a snapshot upstream, only when 8080 is free and that upstream already returns a JPEG. | Decision tests and a simulated loop | 8080 is unmet. Both units stay inactive. Not viewed on a phone. |
+| Safety service wiring | Launchers wait for container `rclpy`, then refuse to copy unless the assumed bind is actually present. | The mount checker rejects the reported bind list. | Live units are already active. Do not restart them from this handoff. |
 
-The motion gate treats only `src == "joystick"` as teleop. Every other velocity source is autonomous. Autonomous motion is refused when the health file is missing, older than 3 seconds, malformed, or lacks a fresh physical LiDAR sample (valid fraction at least 0.50). Depth is an autonomous range only when `depth_unit` is `crosscheck_mm`, `crosscheck_m`, or `32FC1_metres` and coverage meets the same fraction. A user capability default of "on", or a missing `caps.json`, does not by itself allow autonomy.
+Unit tests are not acceptance.
 
-A saved `caps.json` with boolean `lidar: false` stays off across `sync()`. Malformed JSON is not rewritten into `lidar: true`. Fault strings are not stored.
+## Measurements on this workspace, not the Pi
 
-## Camera overlay
+`python3 tests/test_wally.py` — 130 passed, 0 failed, before this handoff note. Re-run after these edits and record the new count in the commit message if it changes.
 
-`gb_robot.py` still reads snapshots from `http://127.0.0.1:8080/snapshot`. That port belongs to the stock snapshot server. `gb_stream.py` does not bind 8080 when something is already listening, does not kill that process, and exits 0 so the unit (`Restart=no`) does not loop. The overlay default is `192.168.50.125:8081` in `gb-stream.service`. The page is read-only. There is no token in the URL. Anyone on the LAN who can open the port can see the camera; do not forward it on the router.
-
-The stream keeps one latest frame, draws a person box on a copy, and only when that box timestamp matches the frame. It does not open a camera device and does not run a second detector. The box fields are added to the existing `gb_rgbguard.py` inference output.
-
-## What unit tests covered
-
-`python3 tests/test_wally.py` — 130 passed, 0 failed, on this workspace, without a robot, microphone, or network API.
-
-A simulated 5 ms loop, 30 iterations, on this workspace (not the Pi) printed median iteration time. Two runs:
+A simulated 5 ms loop, 30 iterations, printed median iteration time. Two earlier runs:
 
 - idle 0.000086 s, push latest frame 0.000101 s, draw on the control thread 0.000120 s
 - idle 0.000134 s, push 0.000114 s, draw 0.000140 s
+- later idle 0.000087 s, push 0.000092 s, draw 0.000103 s
 
-Push stayed under the draw cost in both runs. The second run shows push inside the noise of an empty loop, so the difference is not a stable microsecond budget. This is not speech or motor latency on the Pi, and it is not zero impact.
+Push stayed under the draw cost. The second run puts push inside the noise of an empty loop. That is not speech or motor latency on the Pi, and it is not zero impact.
 
-Also re-run in this workspace earlier in the same build: `test_tilt.py` 74/0, `test_reexplore.py` 33/0, `test_obstacle.py` 144/0, and the estop phrase tests (`test_drivestop`, `test_natural`, `test_bargein`, `test_relatch`, `test_autoclear`) passed. Those phrase tests were not repeated after the wake-grammar edit because they do not import the wake matcher.
+`test_tilt.py` 74/0 and `test_reexplore.py` 33/0 were run in this workspace before the handoff edits. Phrase tests (`test_drivestop`, `test_natural`, `test_bargein`, `test_relatch`, `test_autoclear`) passed earlier and do not import the wake matcher.
 
-## Not tested on the robot
+## Apply
 
-Spoken "wake up Wally", WonderEcho "Hello Hiwonder", Grok API reachability, depth-unit cross-check against a real Aurora frame, the overlay in a phone browser, CPU on the Pi 5, and any track motion. Tracks-off-ground motion is not required for the caps or wake changes. The parent runs any live check.
+From the unpacked archive, on the Pi, after it has been copied to a staging directory:
+
+`WALLY_DEPLOY_APPLY=1 deploy/wally_deploy.sh`
+
+Dry-run is the default. Apply copies host modules, backs up the previous code without data/models/voices, migrates only `WAKE_*` lines in `grokbot.env`, and restores safety launchers from that backup when the mount check fails. It does not restart services, does not play audio, and does not write `secrets.env` or `caps.json`.
+
+Rollback, given the backup directory the apply printed:
+
+`deploy/wally_rollback.sh /home/pi/grokbot/backup-wally-<stamp>`
+
+That restores the backed-up code and disables `gb-front` and `gb-stream` only. It does not stop `web_video_server`.

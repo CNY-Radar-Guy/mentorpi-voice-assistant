@@ -6,6 +6,11 @@ set -u
 C=MentorPi
 GB=/home/pi/grokbot
 SH=/home/pi/docker/tmp/gb_guard          # = /home/ubuntu/shared/gb_guard inside the container
+if ! python3 "$GB/mount_check.py" "$(docker inspect -f '{{json .HostConfig.Binds}}' $C 2>/dev/null || echo '[]')" >/tmp/gb-mount-check.json; then
+  echo "$(date '+%F %T') [guard-run] safety copy blocked. Bind list was not verified. No files copied."
+  cat /tmp/gb-mount-check.json 2>/dev/null || true
+  exit 1
+fi
 mkdir -p "$SH"
 cp -f "$GB/gb_guard.py" "$SH/gb_guard.py"
 rm -f "$SH/mission_active"               # never inherit a mission bypass flag across guard restarts

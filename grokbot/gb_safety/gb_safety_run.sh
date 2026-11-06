@@ -10,6 +10,12 @@ C=MentorPi
 GB=/home/pi/grokbot
 SH=/home/pi/docker/tmp/gb_safety                 # = /home/ubuntu/shared/gb_safety in the container
 HOST_ESTOP=$GB/data/ESTOP
+# Do not create or write the container tree until docker inspect shows the assumed mount.
+if ! python3 "$GB/mount_check.py" "$(docker inspect -f '{{json .HostConfig.Binds}}' $C 2>/dev/null || echo '[]')" >/tmp/gb-mount-check.json; then
+  echo "$(date '+%F %T') [$WHAT-run] safety copy blocked. Bind list does not match /home/pi/docker/tmp -> /home/ubuntu/shared. No files copied. No motion."
+  cat /tmp/gb-mount-check.json 2>/dev/null || true
+  exit 1
+fi
 mkdir -p "$SH" "$GB/data"
 cp -f "$GB/gb_safety/gb_$WHAT.py" "$SH/gb_$WHAT.py"
 cp -f "$GB/gb_obstacle.py" "$SH/gb_obstacle.py"            # 2026-11-05: obstacle fusion shared by gate + explore
