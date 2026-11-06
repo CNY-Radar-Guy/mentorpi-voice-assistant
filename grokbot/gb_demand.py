@@ -7,7 +7,12 @@ permission to drive.
 """
 import json, os, time
 
-MODES = ("follow", "point")
+MODES = ("follow", "point", "view")
+
+
+def moves(mode):
+    """View wakes the camera worker only. It is not a motor command."""
+    return mode in ("follow", "point")
 
 
 def write_demand(path, mode, now=None):

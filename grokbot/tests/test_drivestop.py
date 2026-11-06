@@ -1,5 +1,5 @@
-import sys
-sys.path.insert(0, "/home/pi/grokbot")
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gb_estop as g
 # (phrase, expect): drive+/drive- = no kill (idle or moving) and parses as a timed drive/turn with that sign
 #                   KILL = latches idle AND moving;  KILL-moving = latches while moving/playing (idle behaviour unchanged)

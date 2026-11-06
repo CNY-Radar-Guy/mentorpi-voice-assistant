@@ -149,7 +149,8 @@ def play_wav_bytes(wav_bytes, text=""):
     finally:
         PLAY_STATE["playing"] -= 1; PLAY_STATE["last_end"] = time.time()
 
-SPEAKING_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "speaking.json")
+import gb_paths
+SPEAKING_FLAG = gb_paths.speaking_flag()
 SPEAK_TAIL_S = 0.3
 
 def speaking_flag(on, text=""):

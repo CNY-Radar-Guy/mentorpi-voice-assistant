@@ -73,7 +73,7 @@ class RgbGuard(Node):
             return None
 
     def manage(self):
-        want = self.moving or self.demand() in ("follow", "point")
+        want = self.moving or self.demand() in ("follow", "point", "view")
         if want and self.sub is None:
             self.sub = self.create_subscription(Image, TOPIC, self.on_img, qos_profile_sensor_data)
             self.depth_sub = self.create_subscription(Image, E("GB_DEPTH_TOPIC", "/ascamera/camera_publisher/depth0/image_raw"), self.on_depth, qos_profile_sensor_data)
@@ -109,7 +109,7 @@ class RgbGuard(Node):
     def worker(self):
         while rclpy.ok():
             m = self.img
-            if (not self.moving and self.demand() not in ("follow", "point")) or m is None or self.img_t <= self.done_t or time.time() - self.done_t < 1.0 / HZ:
+            if (not self.moving and self.demand() not in ("follow", "point", "view")) or m is None or self.img_t <= self.done_t or time.time() - self.done_t < 1.0 / HZ:
                 time.sleep(0.05); continue
             self.done_t = time.time()
             try:

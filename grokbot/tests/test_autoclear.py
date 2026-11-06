@@ -1,6 +1,6 @@
 """Offline ESTOP auto-clear tests: temp ESTOP paths, mocked clock + one short real timeout. No audio, rosbridge or motors."""
 import json, os, sys, tempfile, time
-sys.path.insert(0, "/home/pi/grokbot")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gb_estop as g
 
 REAL = g.ESTOP; real_sig = g.latch_sig(REAL)

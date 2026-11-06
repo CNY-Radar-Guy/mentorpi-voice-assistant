@@ -8,6 +8,8 @@ User=pi
 WorkingDirectory=/home/pi/grokbot
 Environment=STREAM_BIND=192.168.50.125
 Environment=STREAM_PORT=8081
+Environment=STOCK_MJPEG_URL=http://127.0.0.1:8080/stream?topic=/ascamera/camera_publisher/rgb0/image
+Environment=STREAM_REQUIRE_CV=1
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/pi/grokbot/venv/bin/python /home/pi/grokbot/gb_stream.py
 Restart=no

@@ -31,7 +31,7 @@ if [ "$FAST" != 1 ]; then
   CI=$(docker exec "$C" stat -c %i /home/ubuntu/shared 2>/dev/null || true)
   if [ -n "$HI" ] && [ -n "$CI" ]; then INODE_FLAGS="--inodes ${HI},${CI}"; fi
 fi
-if ! python3 "$GB/mount_check.py" --inspect "$MOUNTS_JSON" --mountinfo "$INFO_FILE" $INODE_FLAGS >/tmp/gb-mount-check.json; then
+if ! python3 "$TREE/mount_check.py" --inspect "$MOUNTS_JSON" --mountinfo "$INFO_FILE" $INODE_FLAGS >/tmp/gb-mount-check.json; then
   echo "$(date '+%F %T') [$WHAT-run] safety copy blocked. Live .Mounts do not show /home/pi/docker/tmp -> /home/ubuntu/shared. No files copied. No motion."
   cat /tmp/gb-mount-check.json 2>/dev/null || true
   rm -f "$MOUNTS_JSON" "$INFO_FILE"

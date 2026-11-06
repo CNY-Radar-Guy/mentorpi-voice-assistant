@@ -9,8 +9,8 @@ NAME = "MAINT"
 
 
 def default_path():
-    base = os.environ.get("GB_DIR") or os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base, "data", NAME)
+    import gb_paths
+    return os.path.join(gb_paths.data_dir(), NAME)
 
 
 def is_set(path=None):

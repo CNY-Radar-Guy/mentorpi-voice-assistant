@@ -9,13 +9,14 @@ resumes a goal. The maintenance file is a different latch and is not cleared her
 Timed motion: parse_motion() -> {"op":"timed"|"turn",...}; gate_request() sends it ONCE; the gate owns the clock.
 """
 import json, os, re, threading, time, uuid
+import gb_paths
 
 E = os.environ.get
-GB = os.path.dirname(os.path.abspath(__file__))
-ESTOP = os.path.join(GB, "data", "ESTOP")
-SHARED_ESTOP = "/home/pi/docker/tmp/gb_safety/ESTOP"
-LOG = os.path.join(GB, "data", "estop.log")
-CLAP_CFG = os.path.join(GB, "data", "clap.json")
+GB = os.environ.get("GB_DIR") or "/home/pi/grokbot"
+ESTOP = gb_paths.host_estop()
+SHARED_ESTOP = gb_paths.shared_estop()
+LOG = os.path.join(gb_paths.data_dir(), "estop.log")
+CLAP_CFG = os.path.join(gb_paths.data_dir(), "clap.json")
 REQ_TOPIC = "/gb/motion_req"
 TIMED_DEFAULT = 3.0
 TIMED_CAP = 10.0

@@ -1,7 +1,7 @@
 """Offline natural-phrasing / overlap / resume-over-playback tests: decision functions only, no audio, no motors,
 temp ESTOP path (the real data/ESTOP is never touched)."""
 import os, sys, tempfile
-sys.path.insert(0, "/home/pi/grokbot")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gb_estop as g
 
 REAL_ESTOP = g.ESTOP

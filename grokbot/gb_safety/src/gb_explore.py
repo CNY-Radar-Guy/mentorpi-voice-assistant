@@ -15,6 +15,7 @@ Dry run (--dry): identical logic, but nothing is published on /controller/cmd_ve
 """
 import json, math, os, re, signal, subprocess, sys, threading, time
 
+import gb_paths
 E = os.environ.get
 HARD_MAX_LIN, HARD_MAX_ANG = 0.096, 0.64                       # never exceeded, whatever the env says
 MAX_LIN = min(HARD_MAX_LIN, abs(float(E("EXPLORE_MAX_LIN", "0.08"))))
@@ -44,7 +45,7 @@ ROSRUN = CONT_SHARED + "/grokbot/rosrun.sh"
 CMD_VEL = "/controller/cmd_vel"
 GATE_IN = "/gb/cmd_in"                                       # non-zero motion goes through gb_gate (deadman 0.5 s, caps, ESTOP)
 ESTOP_CONT = "/home/ubuntu/shared/gb_safety/ESTOP"
-ESTOP_HOST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "ESTOP")
+ESTOP_HOST = gb_paths.host_estop()
 
 class _GateRoute:
     """Publisher shim: every command -> gate stream; zero commands ALSO straight to the controller (always allowed)."""

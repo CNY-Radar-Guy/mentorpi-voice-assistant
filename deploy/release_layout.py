@@ -58,6 +58,10 @@ def dropin_text(component, release_root):
             "[Service]\n"
             "WorkingDirectory=%s\n"
             "Environment=SUPPRESS_STARTUP_SPEECH=1\n"
+            "Environment=GB_DATA=/home/pi/grokbot/data\n"
+            "Environment=GB_DIR=/home/pi/grokbot\n"
+            "Environment=GB_MODELS=/home/pi/grokbot/models\n"
+            "Environment=GB_SHARED_ESTOP=/home/pi/docker/tmp/gb_safety/ESTOP\n"
             "Environment=PYTHONPATH=%s\n"
             "ExecStart=\n"
             "ExecStart=/home/pi/grokbot/venv/bin/python %s\n" % (release_root, release_root, script)

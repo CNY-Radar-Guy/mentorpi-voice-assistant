@@ -1,6 +1,6 @@
 # Wally integration status
 
-Not deployed. The phone page on port 8080 is not ready, and `web_video_server` has not been moved. Apply stages a release directory and does not replace the modules the running voice imports. A process changes version only when its own drop-in is installed.
+Not deployed. Port 8080 stays the stock camera server. The overlay reads `http://127.0.0.1:8080/stream?topic=/ascamera/camera_publisher/rgb0/image` and, when started, serves `http://192.168.50.125:8081/stream.mjpg`. A box is drawn only from a fresh detector record. NavigateToPose is not running, `hand_landmarker.task` is not installed, `gb-health` is not enabled, and the live person detector is still the previous release until `gb-rgbguard` is restarted from this tree. Apply only stages a release. The voice drop-in sets `GB_DATA=/home/pi/grokbot/data` so a stop is written to the live latch and to `/home/pi/docker/tmp/gb_safety/ESTOP`. Launchers load `mount_check.py` from `GB_TREE`.
 
 ## Live mount, 2026-11-06 5:49 PM ET
 

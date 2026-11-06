@@ -6,9 +6,9 @@ import numpy as np
 import cv2
 import gb_robot, gb_caps
 
+import gb_paths
 E = os.environ.get
-HOME = os.path.dirname(os.path.abspath(__file__))
-DATA = os.path.join(HOME, "data"); MODELS = os.path.join(HOME, "models")
+DATA = gb_paths.data_dir(); MODELS = gb_paths.models_dir()
 OBJ_DIR = os.path.join(DATA, "objects"); FACE_DIR = os.path.join(DATA, "faces"); JOY_DIR = os.path.join(DATA, "joystick")
 OBJ_DB = os.path.join(DATA, "objects.db"); FACE_DB = os.path.join(FACE_DIR, "faces.db")
 DEPTH_TOPIC = E("DEPTH_TOPIC", "/ascamera/camera_publisher/depth0/image_raw")

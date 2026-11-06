@@ -31,15 +31,30 @@ def listener_on(host, port, timeout=0.2):
         s.close()
 
 
+def lan_host(host):
+    """Loopback or an RFC1918 address. 0.0.0.0 would publish the camera on every interface."""
+    host = (host or "").strip()
+    if host in ("127.0.0.1", "::1"):
+        return True
+    parts = host.split(".")
+    if len(parts) != 4 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+        return False
+    a, b = int(parts[0]), int(parts[1])
+    return a == 10 or (a == 172 and 16 <= b <= 31) or (a == 192 and b == 168)
+
+
 def choose_bind(port, host="127.0.0.1"):
     """(addr, status). None addr means do not bind and do not retry in a loop."""
     port = int(port)
-    if port == SNAPSHOT_PORT and (listener_on("127.0.0.1", SNAPSHOT_PORT) or listener_on(host, SNAPSHOT_PORT)):
-        return None, {"state": "blocked", "reason": "port 8080 is in use; left for the snapshot server",
-                      "snapshot": "http://127.0.0.1:8080/snapshot", "overlay_port": None}
-    if listener_on(host, port):
+    if port == SNAPSHOT_PORT:
+        return None, {"state": "blocked", "reason": "port 8080 stays with the stock camera server",
+                      "snapshot_port_untouched": SNAPSHOT_PORT, "overlay_port": None}
+    if not lan_host(host):
+        return None, {"state": "blocked", "reason": "bind %s is not a LAN address" % host, "overlay_port": None}
+    if listener_on(host, port) or listener_on("127.0.0.1", port):
         return None, {"state": "blocked", "reason": "port %s is in use" % port, "overlay_port": None}
-    return (host, port), {"state": "ready", "overlay_port": port, "snapshot_port_untouched": SNAPSHOT_PORT}
+    return (host, port), {"state": "ready", "overlay_port": port, "snapshot_port_untouched": SNAPSHOT_PORT,
+                          "readonly": True}
 
 
 class LatestSlot(object):
@@ -84,6 +99,28 @@ def matching_box(frame_t, track, now):
     if abs(float(frame_t) - tt) > MATCH_S or (now - tt) > STALE_S:
         return None
     return box
+
+
+def overlay_jpeg(jpeg, box):
+    """Draw on a copy of a JPEG. No box, or no OpenCV, returns the original bytes unchanged."""
+    if not isinstance(jpeg, (bytes, bytearray)) or not box:
+        return jpeg
+    try:
+        import cv2
+        import numpy as np
+    except Exception:
+        return bytes(jpeg)
+    arr = np.frombuffer(bytes(jpeg), dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        return bytes(jpeg)
+    h, w = img.shape[:2]
+    x1, y1, x2, y2 = [int(v) for v in box]
+    x1 = max(0, min(w - 1, x1)); x2 = max(0, min(w - 1, x2))
+    y1 = max(0, min(h - 1, y1)); y2 = max(0, min(h - 1, y2))
+    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    ok, out = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+    return out.tobytes() if ok else bytes(jpeg)
 
 
 def draw_box(frame, box):
@@ -186,6 +223,10 @@ class StreamServer(object):
             protocol_version = "HTTP/1.1"
             def log_message(self, fmt, *args):
                 return
+            def do_POST(self):
+                self.send_error(405)
+            def do_PUT(self):
+                self.send_error(405)
             def do_GET(self):
                 path = self.path.split("?", 1)[0]
                 if path == "/health":
@@ -213,13 +254,25 @@ class StreamServer(object):
                     while True:
                         item = outer.slot.latest()
                         if outer.quality.paused or item is None or item[1] == seen:
+                            try:
+                                peek = self.connection.recv(1, socket.MSG_PEEK)
+                            except (BlockingIOError, TimeoutError):
+                                peek = b"x"
+                            except OSError:
+                                break
+                            if peek == b"":
+                                break
                             time.sleep(0.02)
                             continue
                         seen = item[1]
                         frame = item[2]
                         box = matching_box(item[0], outer.track, time.time())
-                        shown = draw_box(frame, box) if box else frame
-                        payload = ("--frame\r\nContent-Type: text/plain\r\n\r\n%d\r\n" % seen).encode()
+                        if isinstance(frame, (bytes, bytearray)):
+                            shown = overlay_jpeg(frame, box)
+                            payload = (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(shown)) + shown + b"\r\n"
+                        else:
+                            shown = draw_box(frame, box) if box else frame
+                            payload = ("--frame\r\nContent-Type: text/plain\r\n\r\n%d\r\n" % seen).encode()
                         try:
                             self.wfile.write(payload)
                             self.wfile.flush()
@@ -233,11 +286,184 @@ class StreamServer(object):
         self.httpd.serve_forever()
 
 
+STOCK_MJPEG_URL = (
+    "http://127.0.0.1:8080/stream?topic=/ascamera/camera_publisher/rgb0/image"
+)
+MAX_JPEG_BUFFER = 1_500_000
+
+
+def venv_preflight():
+    """Names of missing host libraries. rclpy is not required."""
+    missing = []
+    try:
+        import cv2  # noqa: F401
+    except Exception:
+        missing.append("cv2")
+    try:
+        import numpy  # noqa: F401
+    except Exception:
+        missing.append("numpy")
+    return missing
+
+
+def extract_jpegs(buf, limit=MAX_JPEG_BUFFER):
+    """Pull complete JPEG frames out of an MJPEG byte stream. Returns (frames, remainder)."""
+    if len(buf) > limit:
+        buf = buf[-limit:]
+    frames = []
+    while True:
+        start = buf.find(b"\xff\xd8")
+        if start < 0:
+            return frames, buf[-1:]
+        end = buf.find(b"\xff\xd9", start + 2)
+        if end < 0:
+            return frames, buf[start:]
+        frames.append(buf[start:end + 2])
+        buf = buf[end + 2:]
+
+
+def read_detector_track(path, now):
+    """A person box from the running detector, or None when it is missing or stale."""
+    try:
+        with open(path) as f:
+            body = json.load(f)
+    except (OSError, ValueError):
+        return None
+    person = body.get("person") if isinstance(body, dict) else None
+    if not isinstance(person, dict):
+        return None
+    try:
+        stamp = float(person.get("t") if person.get("t") is not None else body.get("t"))
+        box = list(person.get("box"))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if len(box) != 4 or now - stamp > STALE_S or stamp - now > 1.0:
+        return None
+    return {"t": stamp, "box": box}
+
+
+class StockMjpeg(object):
+    """Read the stock web_video_server MJPEG URL. Does not bind port 8080."""
+
+    def __init__(self, url, slot, track_path="", demand_path=""):
+        self.url = url
+        self.slot = slot
+        self.track_path = track_path
+        self.demand_path = demand_path
+        self.stop = threading.Event()
+        self.thread = None
+        self.frames = 0
+        self.errors = 0
+        self._sock = None
+        self._demand_at = 0.0
+
+    def start(self):
+        self.thread = threading.Thread(target=self._run, name="stock-mjpeg", daemon=True)
+        self.thread.start()
+        return self
+
+    def close(self):
+        self.stop.set()
+        sock = self._sock
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+        if self.thread is not None:
+            self.thread.join(timeout=2.0)
+        self.thread = None
+        self._resp = None
+        self._release_view()
+
+    def _release_view(self):
+        if not self.demand_path:
+            return
+        try:
+            import gb_demand
+            if gb_demand.read_demand(self.demand_path) == "view":
+                gb_demand.write_demand(self.demand_path, "idle")
+        except Exception:
+            pass
+
+    def _note_demand(self):
+        if not self.demand_path or time.time() - self._demand_at < 5.0:
+            return
+        try:
+            import gb_demand
+            if gb_demand.read_demand(self.demand_path) in ("follow", "point"):
+                return
+            gb_demand.write_demand(self.demand_path, "view")
+            self._demand_at = time.time()
+        except Exception:
+            pass
+
+    def _connect(self):
+        import socket
+        from urllib.parse import urlsplit
+        parts = urlsplit(self.url)
+        host = parts.hostname or "127.0.0.1"
+        port = parts.port or 80
+        path = parts.path or "/"
+        if parts.query:
+            path += "?" + parts.query
+        sock = socket.create_connection((host, port), 5)
+        sock.settimeout(1.0)
+        sock.sendall(("GET %s HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive\r\n\r\n" % (path, host)).encode())
+        self._sock = sock
+        return sock
+
+    def _run(self):
+        while not self.stop.is_set():
+            sock = None
+            try:
+                sock = self._connect()
+                buf = b""
+                header = True
+                while not self.stop.is_set():
+                    try:
+                        chunk = sock.recv(8192)
+                    except TimeoutError:
+                        continue
+                    if not chunk:
+                        break
+                    buf += chunk
+                    if header:
+                        cut = buf.find(b"\r\n\r\n")
+                        if cut < 0:
+                            continue
+                        buf = buf[cut + 4:]
+                        header = False
+                    frames, buf = extract_jpegs(buf)
+                    now = time.time()
+                    for jpeg in frames:
+                        self.slot.offer(now, jpeg)
+                        self.frames += 1
+                    if frames:
+                        self._note_demand()
+            except Exception:
+                if self.stop.is_set():
+                    break
+                self.errors += 1
+                time.sleep(0.5)
+            finally:
+                self._sock = None
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
+
+
 def main():
-    host = os.environ.get("STREAM_BIND", "127.0.0.1")
+    missing = venv_preflight()
+    if missing and os.environ.get("STREAM_REQUIRE_CV", "1") == "1":
+        print("stream preflight missing: %s" % ", ".join(missing))
+        return 1
+    host = os.environ.get("STREAM_BIND", "192.168.50.125")
     port = int(os.environ.get("STREAM_PORT", str(DEFAULT_PORT)))
     addr, status = choose_bind(port, host)
-    path = os.path.expanduser(os.environ.get("STREAM_STATUS", "~/grokbot/data/stream_status.json"))
+    path = os.path.expanduser(os.environ.get("STREAM_STATUS", "/home/pi/grokbot/data/stream_status.json"))
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
@@ -247,8 +473,26 @@ def main():
     if addr is None:
         print("stream blocked:", status["reason"])
         return 0
-    print("overlay on %s:%s; snapshot port %s left alone" % (addr[0], addr[1], SNAPSHOT_PORT))
-    StreamServer(addr[0], addr[1]).serve_forever()
+    server = StreamServer(addr[0], addr[1])
+    url = os.environ.get("STOCK_MJPEG_URL", STOCK_MJPEG_URL)
+    track = os.environ.get("GB_RGB_FILE", "/home/pi/docker/tmp/gb_safety/rgb_guard.json")
+    demand = os.environ.get("GB_DEMAND_FILE", "/home/pi/docker/tmp/gb_safety/demand.json")
+    feed = StockMjpeg(url, server.slot, track, demand)
+
+    def _track_loop():
+        while not feed.stop.is_set():
+            server.track = read_detector_track(track, time.time())
+            time.sleep(0.05)
+
+    threading.Thread(target=_track_loop, name="stream-track", daemon=True).start()
+    feed.start()
+    print("overlay on %s:%s reading %s; port %s left alone" % (addr[0], addr[1], url, SNAPSHOT_PORT))
+    try:
+        server.serve_forever()
+    finally:
+        feed.close()
+        if server.httpd is not None:
+            server.httpd.shutdown()
     return 0
 
 

@@ -1,6 +1,6 @@
 """Offline barge-in / follow-up window tests: decision functions only, no audio, no motors, temp ESTOP path."""
 import os, sys, tempfile
-sys.path.insert(0, "/home/pi/grokbot")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gb_estop as g
 
 REAL_ESTOP = g.ESTOP

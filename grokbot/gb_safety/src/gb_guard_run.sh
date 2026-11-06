@@ -5,6 +5,7 @@
 set -u
 C=MentorPi
 GB=/home/pi/grokbot
+TREE=${GB_TREE:-$GB}
 SH=/home/pi/docker/tmp/gb_guard          # = /home/ubuntu/shared/gb_guard inside the container
 # Live .Mounts only. HostConfig.Binds is stale and must not block this copy.
 MOUNTS_JSON=$(mktemp)
@@ -26,7 +27,7 @@ if [ "$FAST" != 1 ]; then
   CI=$(docker exec "$C" stat -c %i /home/ubuntu/shared 2>/dev/null || true)
   if [ -n "$HI" ] && [ -n "$CI" ]; then INODE_FLAGS="--inodes ${HI},${CI}"; fi
 fi
-if ! python3 "$GB/mount_check.py" --inspect "$MOUNTS_JSON" --mountinfo "$INFO_FILE" $INODE_FLAGS >/tmp/gb-mount-check.json; then
+if ! python3 "$TREE/mount_check.py" --inspect "$MOUNTS_JSON" --mountinfo "$INFO_FILE" $INODE_FLAGS >/tmp/gb-mount-check.json; then
   echo "$(date '+%F %T') [guard-run] safety copy blocked. Live .Mounts were not the expected pair. No files copied."
   cat /tmp/gb-mount-check.json 2>/dev/null || true
   rm -f "$MOUNTS_JSON" "$INFO_FILE"
@@ -34,7 +35,7 @@ if ! python3 "$GB/mount_check.py" --inspect "$MOUNTS_JSON" --mountinfo "$INFO_FI
 fi
 rm -f "$MOUNTS_JSON" "$INFO_FILE"
 mkdir -p "$SH"
-cp -f "$GB/gb_guard.py" "$SH/gb_guard.py"
+cp -f "$TREE/gb_guard.py" "$SH/gb_guard.py"
 rm -f "$SH/mission_active"               # never inherit a mission bypass flag across guard restarts
 
 sync_flag() {
