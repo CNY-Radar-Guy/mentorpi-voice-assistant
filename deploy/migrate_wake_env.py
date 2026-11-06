@@ -60,6 +60,9 @@ def migrate_file(path):
     with open(tmp, "w") as f:
         f.write(updated)
     os.replace(tmp, path)
+    pointer = os.path.join(os.path.dirname(os.path.abspath(path)), ".wally-last-wake-backup")
+    with open(pointer, "w") as f:
+        f.write(backup + "\n")
     return backup, True
 
 

@@ -4,7 +4,7 @@ Handles teaching, pointed missions, the 2 m follow, sensor-health questions,
 and the rule that saying "I am John" is not authentication. Emergency stop
 and unlock still live in gb_estop; this module only drops goals when asked.
 """
-import os, re, tempfile
+import json, os, re, tempfile, time
 import gb_follow
 import gb_health
 import gb_point
@@ -110,6 +110,68 @@ def _obs():
     return {"candidates": [], "person": None, "localized": False, "start": {"x": 0, "y": 0, "yaw": 0}}
 
 
+_runtime = False
+_publisher = None
+
+
+def install_runtime(capture=None, publisher=None):
+    """Called by grokbot_voice.main. Tests leave this unset, so they never touch rosbridge."""
+    global _runtime, _publisher
+    _runtime = True
+    if capture is not None:
+        set_capture(capture)
+    _publisher = publisher
+
+
+def read_person_track(path, now=None):
+    """A person range from a file the parent points at. No path means no range, not a guess."""
+    if not path:
+        return None
+    now = time.time() if now is None else float(now)
+    try:
+        with open(path) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    p = d.get("person") if isinstance(d, dict) else None
+    if not isinstance(p, dict):
+        return None
+    try:
+        age = now - float(p["t"])
+        dist = float(p["depth_m"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if age < 0 or age > 0.5 or dist != dist or dist <= 0:
+        return None
+    if p.get("unit") not in gb_health.VALIDATED_DEPTH_UNITS and p.get("source") != "lidar":
+        return None
+    source = "lidar" if p.get("source") == "lidar" else "depth"
+    return {"depth_m": dist, "source": source, "fresh": True, "bearing": float(p.get("bearing") or 0.0)}
+
+
+def follow_once(health_snap, track, autonomy, protections=None):
+    """One follow decision. Does not invent a distance from a scan median and does not loop."""
+    protections = protections or {}
+    if protections.get("estop") or protections.get("tip_hard") or protections.get("tip_soft") or protections.get("battery_shutdown") or protections.get("watchdog"):
+        return gb_follow.follow_command(None, "none", autonomy=bool(autonomy), protections=protections)
+    if not autonomy:
+        return gb_follow.follow_command(None, "none", autonomy=False, protections=protections)
+    if not gb_health.autonomy_allowed(health_snap):
+        return {"lin": 0.0, "ang": 0.0, "speech": "I won't follow until the range check is fresh.",
+                "allow": False, "reason": "health"}
+    if not track:
+        return {"lin": 0.0, "ang": 0.0, "speech": "I don't have a measured distance to a person, so I won't follow.",
+                "allow": False, "reason": "no_person_range"}
+    return gb_follow.follow_command(track["depth_m"], track["source"], track.get("bearing") or 0.0, True,
+                                     autonomy=True, protections=protections)
+
+
+def _publish(cmd):
+    if not _runtime or _publisher is None:
+        return None
+    return _publisher(cmd)
+
+
 def handle(text, protections=None):
     """Return a spoken reply, or None to let the rest of the voice stack decide.
 
@@ -133,12 +195,19 @@ def handle(text, protections=None):
     if taught:
         return taught
     if re.search(r"\b(follow me|follow john|stay with me)\b", t):
-        obs = _obs()
-        person = obs.get("person") or {}
-        src = person.get("source") or "none"
-        cmd = gb_follow.follow_command(person.get("depth_m"), src, person.get("bearing") or 0.0,
-                                        fresh=bool(person.get("fresh")), autonomy=_autonomy, protections=protections)
+        # One decision. A continuous follow loop is not started here.
+        if _observer and not os.environ.get("PERSON_TRACK_FILE"):
+            obs = _obs()
+            person = obs.get("person") or {}
+            src = person.get("source") or "none"
+            cmd = gb_follow.follow_command(person.get("depth_m"), src, person.get("bearing") or 0.0,
+                                            fresh=bool(person.get("fresh")), autonomy=_autonomy, protections=protections)
+        else:
+            track = read_person_track(os.environ.get("PERSON_TRACK_FILE", ""))
+            cmd = follow_once(gb_health.read_shared(), track, _autonomy, protections)
         mission().commands.append({"lin": cmd["lin"], "ang": cmd["ang"], "why": "follow"})
+        if cmd.get("allow") and (cmd.get("lin") or cmd.get("ang")):
+            _publish(cmd)
         if cmd["speech"]:
             return cmd["speech"]
         if cmd["lin"] or cmd["ang"]:

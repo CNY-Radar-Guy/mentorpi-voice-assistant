@@ -137,7 +137,7 @@ Charge with the kit charger. Hiwonder's guide says to recharge under about 6.4 V
 
    `gb_safety/install.sh` is the on-robot installer used when this stack was first deployed. It copies `gb_safety/src/*.py` over the live modules, points the mic at `gbmic`, and installs the gate, watchdog, and clap units. On a fresh copy the files are already current, so the `cp` above is enough. `revert.sh` restores `*.bak-estop` copies on a Pi that ran `install.sh`. Those backups are not in this repository.
 
-6. **Speaker and microphone.** Plug in the WonderEcho (and a USB speaker if playback is a different card). `grokbot.service` is in the `audio` group. The software wake phrase is "wake up Wally". Startup stays quiet unless `STARTUP_GREETING` is set. The phone overlay, when started, listens on port **8081** and leaves port **8080** for the existing snapshot server used by vision.
+6. **Speaker and microphone.** Plug in the WonderEcho (and a USB speaker if playback is a different card). `grokbot.service` is in the `audio` group. The software wake phrase is "wake up Wally". Startup stays quiet unless `STARTUP_GREETING` is set. Port 8080 is the stock snapshot server. The phone page on that port is not enabled. An optional overlay can listen on **8081** and does not replace the snapshot server.
 
 7. **Enable motion only after a stationary check.** With the rover on a stand or blocked up, set `ALLOW_MOTION=1`, restart `grokbot`, and confirm "stop" latches the tracks before any free-floor drive. Set `LOWV_DRY_RUN=0` only after the spoken battery warning is the one you want.
 

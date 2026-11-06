@@ -52,16 +52,36 @@ tar -C "$ROOT/grokbot" \
   --exclude='*.wav' --exclude='*.bak*' \
   -cf - . | tar -C "$DEST" -xf -
 echo "code snapshot is in $BACK. This script does not delete older backup-wally directories."
-# Safety launchers assume /home/pi/docker/tmp -> /home/ubuntu/shared. The 17:44 ET
-# preflight bind list did not show that pair. Do not replace those files unless it does.
-BINDS='[]'
+printf '%s\n' "$BACK" > "$DEST/.wally-last-code-backup"
+# Live evidence is docker inspect .Mounts, plus /proc/1/mountinfo when the container answers.
+# HostConfig.Binds is stale on this robot and is not consulted.
+MOUNTS_JSON=$(mktemp)
+INFO_FILE=$(mktemp)
 if command -v docker >/dev/null 2>&1; then
-  BINDS=$(docker inspect -f '{{json .HostConfig.Binds}}' MentorPi 2>/dev/null || echo '[]')
+  if ! docker inspect -f '{{json .Mounts}}' MentorPi > "$MOUNTS_JSON" 2>/dev/null; then
+    echo '[]' > "$MOUNTS_JSON"
+  fi
+  if ! docker exec MentorPi cat /proc/1/mountinfo > "$INFO_FILE" 2>/dev/null; then
+    : > "$INFO_FILE"
+  fi
+else
+  echo '[]' > "$MOUNTS_JSON"
+  : > "$INFO_FILE"
+fi
+HI=$(stat -c %i /home/pi/docker/tmp 2>/dev/null || true)
+CI=""
+if command -v docker >/dev/null 2>&1; then
+  CI=$(docker exec MentorPi stat -c %i /home/ubuntu/shared 2>/dev/null || true)
+fi
+INODE_FLAGS=""
+if [ -n "$HI" ] && [ -n "$CI" ]; then
+  INODE_FLAGS="--inodes ${HI},${CI}"
 fi
 set +e
-python3 "$ROOT/deploy/mount_check.py" "$BINDS"
+python3 "$ROOT/deploy/mount_check.py" --inspect "$MOUNTS_JSON" --mountinfo "$INFO_FILE" $INODE_FLAGS
 MOUNT_RC=$?
 set -e
+rm -f "$MOUNTS_JSON" "$INFO_FILE"
 if [ "$MOUNT_RC" != "0" ]; then
   echo "SAFETY MODULES BLOCKED. Restoring launchers and injected nodes from the backup snapshot."
   for rel in gb_safety gb_guard.py gb_guard_run.sh gb_obstacle.py gb_explore.py gb_mapping.py gb-gate.service gb-watchdog.service gb-rgbguard.service gb-guard.service gb-clap.service; do
@@ -81,12 +101,7 @@ else
 fi
 
 echo "not restarting grokbot, gb-gate, gb-watchdog, gb-guard, gb-rgbguard, or web_video_server."
-python3 - << PY
-import sys
-sys.path.insert(0, "$ROOT/grokbot")
-import gb_front
-# The 17:44 ET sample: 8080 is bound. Do not probe /snapshot with an empty topic.
-print(gb_front.preflight_decision(True, snapshot_without_topic_empty=True, upstream_snapshot_jpeg=False)["reason"])
-PY
-echo "Phone URL http://192.168.50.125:8080/ is unmet while web_video_server owns 8080. gb-stream and gb-front stay inactive."
+python3 "$ROOT/deploy/port8080_plan.py"
+echo "Phone URL http://192.168.50.125:8080/ is unmet. The stock server was not moved. gb-stream and gb-front stay inactive."
+echo "Safety activation is separate and still dry unless you run it on the Pi: deploy/wally_activate.sh"
 echo "Rollback: deploy/wally_rollback.sh $BACK"

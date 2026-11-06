@@ -1864,7 +1864,39 @@ def _health_monitor():
             log("health monitor:", ex)
         time.sleep(1.0)
 
+def _install_wally_runtime():
+    """Teaching capture uses the existing snapshot URL. A follow step, if allowed, goes through the gate.
+
+    No follow loop is started. A pointed mission is still only a spoken decision here;
+    it is not ticked onto /gb/motion_req. Autonomy stays off unless the env says otherwise.
+    """
+    try:
+        import gb_wally
+    except Exception as ex:
+        log("wally runtime not installed:", ex)
+        return
+
+    def capture():
+        import io
+        from PIL import Image
+        import gb_robot
+        jpeg = gb_robot.snapshot()
+        im = Image.open(io.BytesIO(jpeg)).convert("L").resize((9, 8))
+        px = list(im.getdata())
+        return [px[i * 9:(i + 1) * 9] for i in range(8)], None
+
+    def publish(cmd):
+        if not cmd.get("allow") or gb_estop.is_set():
+            return None
+        return gb_estop.gate_request({
+            "op": "timed", "lin": float(cmd.get("lin") or 0), "ang": float(cmd.get("ang") or 0),
+            "dur": 0.25, "src": "wally"})
+
+    gb_wally.install_runtime(capture=capture, publisher=publish)
+
+
 def main():
+    _install_wally_runtime()
     log(f"{BOT_NAME}: backend={LLM_BACKEND} key={'set' if has_key() else 'missing'} ollama={OLLAMA_MODEL} "
         f"STT={STT_BACKEND} TTS={TTS_BACKEND} trigger={TRIGGER} web=:{WEB_PORT} data={DATA}")
     store.write_labels_tsv()
