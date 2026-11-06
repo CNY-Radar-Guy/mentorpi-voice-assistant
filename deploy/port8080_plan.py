@@ -10,11 +10,18 @@ Live facts, 2026-11-06 evening, from the parent (not guessed):
   * the stock server has no proxy and no redirect
   * port 8081 was free
 
-This repository does not contain bringup.launch.py. The ROS parameter on
-web_video_server itself is `port`. Whether bringup exposes that as a launch
-argument that can change the video server without restarting the lidar,
-camera, and controller drivers is not in this tree, so this plan does not
-invent an argument name and does not apply a change.
+The live bringup.launch.py (source and install identical, 25 Jun 2025) starts
+the server with no arguments and no parameters:
+
+    Node(package='web_video_server', executable='web_video_server', output='screen')
+
+Package 1.0.0 main() creates node web_video_server and a second node
+_web_video_server. The constructor calls get_parameter("port") once on that
+private node and, when the parameter is unset, uses 8080 and address 0.0.0.0,
+then starts the socket. There is no declare_parameter and no parameter
+callback. ros2 param get /web_video_server port is unset. ros2 param set does
+not change the bind. A second process would also default to 8080, so this
+plan does not start one. Snapshots stay on the existing server.
 
 An overlay on 8081 does not fulfill a phone page on 8080.
 """
@@ -23,14 +30,17 @@ LAUNCH = "ros2 launch bringup bringup.launch.py"
 SNAPSHOT_TOPIC = "/ascamera/camera_publisher/rgb0/image"
 SNAPSHOT_URL = "http://127.0.0.1:8080/snapshot?topic=" + SNAPSHOT_TOPIC
 ROS_PARAM = "port"
+PORT_MUTABLE = False
+PROBE = (
+    "ros2 param list /web_video_server",
+    "curl -sI http://127.0.0.1:8080/snapshot?topic=/ascamera/camera_publisher/rgb0/image",
+)
 
 REMAINING = (
-    "Parent reads bringup.launch.py inside the MentorPi image and names a launch argument that sets only the web_video_server ROS parameter `port`.",
-    "That argument must move the video server to an internal port such as 8082 without restarting the lidar, camera, or controller drivers. Restarting all of `ros2 launch bringup bringup.launch.py` is not an acceptable migration.",
-    "This repository does not contain bringup.launch.py, so no argument name is invented here and no launch file is edited.",
-    "After a reviewed move, GET http://127.0.0.1:8082/snapshot?topic=/ascamera/camera_publisher/rgb0/image must return a JPEG before anything binds 8080.",
-    "Only then may gb-front bind 8080 and proxy /snapshot?topic= to that upstream and proxy the phone root to the 8081 overlay. Until that review, 8080 stays unmet.",
-    "Port 8081 is free. Starting the overlay there leaves the stock server on 8080 and does not make the phone root ready.",
+    "The stock node is already bound to 8080. ros2 param set does not move it, and this plan does not restart bringup.",
+    "A second web_video_server would also use port 8080. Do not start one. The read-only probes are ros2 param list /web_video_server and a snapshot GET that does not bind a port.",
+    "Snapshots stay on http://127.0.0.1:8080/snapshot?topic=/ascamera/camera_publisher/rgb0/image. That URL already returned a JPEG.",
+    "8080 stays unmet for the phone page. gb-front and gb-stream stay inactive. An overlay on 8081 does not fulfill the phone root.",
 )
 
 INVERSE_ROLLBACK = (
@@ -56,6 +66,7 @@ def migration_decision(launch_arg_reviewed=False, drivers_preserved=False, jpeg_
         "reviewed_argument_present": reviewed,
         "launch": LAUNCH,
         "ros_parameter": ROS_PARAM,
+        "port_mutable": PORT_MUTABLE,
         "snapshot_url": SNAPSHOT_URL,
         "remaining": list(REMAINING),
         "inverse_rollback": list(INVERSE_ROLLBACK),

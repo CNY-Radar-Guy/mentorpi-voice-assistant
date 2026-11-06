@@ -50,3 +50,107 @@ def follow_command(range_m, source, bearing=0.0, fresh=True, autonomy=False, pro
         if abs(bear) > 0.50:
             lin = 0.0  # turn in place rather than arc into an unknown side
     return {"lin": lin, "ang": ang, "speech": None, "allow": True, "reason": source}
+
+
+CONF_MIN = 0.75
+LOST_S = 1.0
+MAX_RUN_S = 120.0
+DEPTH_FRESH_S = 0.5
+
+
+def _usable_track(track):
+    """Return (track, reason). A missing confidence is not a person."""
+    if not track or not track.get("fresh"):
+        return None, "person_lost"
+    if track.get("ambiguous"):
+        return None, "ambiguous"
+    try:
+        conf = float(track["conf"])
+    except (KeyError, TypeError, ValueError):
+        return None, "confidence"
+    if conf < CONF_MIN:
+        return None, "confidence"
+    if track.get("source") == "depth":
+        try:
+            age = float(track.get("depth_age", 0))
+        except (TypeError, ValueError):
+            return None, "depth_stale"
+        if age > DEPTH_FRESH_S:
+            return None, "depth_stale"
+        if track.get("unit") not in gb_health.VALIDATED_DEPTH_UNITS:
+            return None, "depth_unit"
+    return track, None
+
+
+class FollowLoop(object):
+    """Closed loop. Each step is one command. Loss, timeout, and safety cancel it.
+
+    The loop does not invent a range. Autonomy off cancels rather than arming a later move.
+    """
+
+    def __init__(self):
+        self.active = False
+        self.t0 = None
+        self.lost_since = None
+        self.reason = None
+        self.had_track = False
+
+    def start(self, now):
+        self.active = True
+        self.t0 = float(now)
+        self.lost_since = None
+        self.reason = None
+        self.had_track = False
+
+    def cancel(self, why):
+        self.active = False
+        self.reason = why
+        speech = {
+            "person_lost": "I don't have a measured distance to a person, so I won't follow.",
+            "person_lost_later": "I lost the person, so I stopped.",
+            "timeout": "I followed for too long, so I stopped.",
+            "confidence": "I'm not sure that's a person, so I stopped.",
+            "ambiguous": "I see more than one person, so I won't follow.",
+            "depth_stale": "The depth reading is stale, so I stopped.",
+            "depth_unit": "The depth unit is not checked, so I won't follow.",
+            "estop": "Emergency stop.",
+            "maintenance": "The maintenance lock is on, so I won't follow.",
+            "health": "I won't follow until the range check is fresh.",
+            "autonomy_off": "Autonomy is off. I will not follow.",
+        }.get(why, "I'm staying put.")
+        return {"lin": 0.0, "ang": 0.0, "allow": False, "op": "stop", "reason": why, "speech": speech}
+
+    def step(self, now, health_snap, track, autonomy, protections=None, maint=False):
+        if not self.active:
+            return {"lin": 0.0, "ang": 0.0, "allow": False, "op": "idle", "reason": "idle", "speech": None}
+        now = float(now)
+        protections = protections or {}
+        if maint or protections.get("maint"):
+            return self.cancel("maintenance")
+        if protections.get("estop") or protections.get("tip_hard") or protections.get("tip_soft") or protections.get("battery_shutdown") or protections.get("watchdog"):
+            return self.cancel("estop" if protections.get("estop") else "safety")
+        if now - self.t0 > MAX_RUN_S:
+            return self.cancel("timeout")
+        if not autonomy:
+            return self.cancel("autonomy_off")
+        usable, why = _usable_track(track)
+        if usable is None:
+            if why in ("confidence", "ambiguous", "depth_stale", "depth_unit"):
+                return self.cancel(why)
+            if not self.had_track:
+                return self.cancel("person_lost")
+            if self.lost_since is None:
+                self.lost_since = now
+            if now - self.lost_since >= LOST_S:
+                return self.cancel("person_lost_later")
+            return {"lin": 0.0, "ang": 0.0, "allow": False, "op": "hold", "reason": "person_gap", "speech": None}
+        self.had_track = True
+        self.lost_since = None
+        if not gb_health.autonomy_allowed(health_snap, now):
+            return self.cancel("health")
+        cmd = follow_command(usable["depth_m"], usable["source"], usable.get("bearing") or 0.0, True,
+                             autonomy=True, protections=protections)
+        cmd["op"] = "timed" if cmd.get("allow") and (cmd.get("lin") or cmd.get("ang")) else "hold"
+        if not cmd.get("allow"):
+            return self.cancel(cmd.get("reason") or "refused")
+        return cmd

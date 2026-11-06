@@ -127,16 +127,16 @@ missing = subprocess.run(["bash", os.path.join(REPO, "deploy", "wally_rollback.s
 check("missing backup still disables cameras", missing.returncode == 2 and "disabled" in missing.stdout, missing.stdout + missing.stderr)
 
 # Activation does not clear a latch, and a restart that would speak or auto-clear is refused.
-check("silent env is allowed when no latch exists", voice_restart_allowed("ALLOW_MOTION=0\n", False)[0] is True)
-check("startup greeting blocks a voice restart", voice_restart_allowed("STARTUP_GREETING=hello\n", False)[0] is False)
-check("tts warmup blocks a voice restart", voice_restart_allowed("TTS_WARMUP=1\n", False)[0] is False)
-check("health speech blocks a voice restart", voice_restart_allowed("HEALTH_SPEAK=1\n", False)[0] is False)
-check("autonomy on blocks activation voice restart", voice_restart_allowed("ALLOW_AUTONOMY=1\n", False)[0] is False)
-check("latched estop with default autoclear is not restarted", voice_restart_allowed("", True)[0] is False)
-check("latched estop with autoclear off can stay silent", voice_restart_allowed("ESTOP_AUTOCLEAR_S=0\n", True)[0] is True)
+check("suppress flag allows a silent reload", voice_restart_allowed("SUPPRESS_STARTUP_SPEECH=1\nESTOP_AUTOCLEAR_S=0\n", False)[0] is True)
+check("empty greeting is not the suppress switch", voice_restart_allowed("STARTUP_GREETING=\n", False)[0] is False)
+check("warmup alone is not the suppress switch", voice_restart_allowed("TTS_WARMUP=0\n", False)[0] is False)
+check("health speech alone is not the suppress switch", voice_restart_allowed("HEALTH_SPEAK=0\n", False)[0] is False)
+check("autonomy on blocks a voice reload", voice_restart_allowed("SUPPRESS_STARTUP_SPEECH=1\nALLOW_AUTONOMY=1\n", False)[0] is False)
+check("timer still set blocks a voice reload", voice_restart_allowed("SUPPRESS_STARTUP_SPEECH=1\nESTOP_AUTOCLEAR_S=15\n", True)[0] is False)
 check("two second window", within_window(2.0) and not within_window(2.01))
-check("plan holds zero before restart", PLAN[1].startswith("Start a zero Twist") and "within 2 seconds" in PLAN[3])
-check("plan does not clear an existing latch", any("Never rewrite or delete" in line for line in PLAN))
+check("plan holds zero before restart", "zero Twist" in PLAN[2] and "within 2 seconds" in PLAN[3])
+check("plan leaves the voice process running", any("Leave grokbot running" in line for line in PLAN))
+check("plan does not delete a user ESTOP", any("Do not create or delete data/ESTOP" in line for line in PLAN))
 
 latch_dir = tempfile.mkdtemp(prefix="wally_estop_")
 keep = os.path.join(latch_dir, "ESTOP")
@@ -171,7 +171,7 @@ said = gb_wally.handle("follow me")
 check("follow without a person range does not publish", calls == [] and "measured distance" in (said or ""), said)
 track = os.path.join(tempfile.mkdtemp(prefix="wally_track_"), "person.json")
 with open(track, "w") as f:
-    json.dump({"person": {"t": now, "depth_m": 3.2, "source": "lidar", "bearing": 0.0}}, f)
+    json.dump({"person": {"t": now, "depth_m": 3.2, "source": "lidar", "bearing": 0.0, "conf": 0.9}}, f)
 os.environ["PERSON_TRACK_FILE"] = track
 try:
     said2 = gb_wally.handle("follow me")
@@ -180,7 +180,10 @@ finally:
     gb_wally._runtime = False
     gb_wally._publisher = None
     gb_wally.set_autonomy(False)
-check("fresh lidar track publishes one gated step", len(calls) == 1 and calls[0]["allow"] is True and said2 and "2 metres" in said2, (calls, said2))
+again = gb_wally.follow_loop().step(now + 0.2, gb_health.read_shared(now=now + 0.2),
+                                   gb_wally.read_person_track(track, now=now + 0.2), True)
+check("follow loop keeps a second step", again.get("allow") is True and gb_wally.follow_loop().active, again)
+check("fresh lidar track publishes the first step", len(calls) == 1 and calls[0]["allow"] is True and said2 and "2 metres" in said2, (calls, said2))
 stale_track = gb_wally.read_person_track(track, now=now + 5)
 check("stale person track is ignored", stale_track is None)
 depth_bad = os.path.join(tempfile.mkdtemp(), "bad.json")

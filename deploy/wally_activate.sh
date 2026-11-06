@@ -3,11 +3,11 @@
 # The cloud agent must not run this with WALLY_ACTIVATE=1.
 #
 # WALLY_ACTIVATE=1, on the Pi, as user pi:
-#   * refuses to continue unless live .Mounts show /home/pi/docker/tmp -> /home/ubuntu/shared
-#   * publishes zero Twist before the gate is restarted
-#   * creates a transition ESTOP only when none exists, and never deletes one
-#   * restarts gb-gate and gb-watchdog and requires both processes within 2 seconds
-#   * does not restart grokbot, does not speak, does not follow, does not move port 8080
+#   * refuses unless live .Mounts show /home/pi/docker/tmp -> /home/ubuntu/shared
+#   * writes a maintenance lock and does not create or delete data/ESTOP
+#   * publishes zero Twist, then restarts only gb-gate and gb-watchdog
+#   * leaves grokbot running so spoken stop and wake stay up
+#   * does not move web_video_server and does not clear the maintenance lock
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 DEST=${WALLY_DEST:-$HOME/grokbot}
@@ -58,20 +58,15 @@ if ! docker exec -d -u ubuntu "$C" bash -lc 'source /opt/ros/humble/setup.bash; 
 fi
 
 HOST_ESTOP="$DEST/data/ESTOP"
-SHARED_ESTOP=/home/pi/docker/tmp/gb_safety/ESTOP
 if [ -e "$HOST_ESTOP" ]; then
-  echo "existing ESTOP left untouched. It will not be cleared."
-else
-  # Stop voice before creating the latch so estop_reactor cannot speak "Emergency stop."
-  if command -v systemctl >/dev/null 2>&1; then
-    if ! sudo systemctl stop grokbot; then
-      echo "activation refused. grokbot did not stop, so no latch was written and safety units were not restarted."
-      exit 4
-    fi
-  fi
-  python3 "$ROOT/deploy/activate_plan.py" latch "$HOST_ESTOP" "$SHARED_ESTOP"
-  echo "transition ESTOP created. This script does not remove it. grokbot was stopped and is not restarted."
+  echo "existing ESTOP left untouched. This script does not clear a user stop."
 fi
+python3 "$ROOT/deploy/activate_plan.py" maint "$DEST/data/MAINT" /home/pi/docker/tmp/gb_safety/MAINT
+if [ ! -e "$DEST/data/MAINT" ]; then
+  echo "activation refused. Maintenance lock was not written. No unit was restarted."
+  exit 4
+fi
+echo "maintenance lock is present. grokbot is not stopped."
 
 date +%s > "$DEST/data/ACTIVATION"
 if command -v systemctl >/dev/null 2>&1; then
@@ -92,15 +87,20 @@ if command -v systemctl >/dev/null 2>&1; then
   end_ns=$(date +%s%N)
   elapsed=$(python3 -c "print((${end_ns} - ${start_ns}) / 1e9)")
   if [ "$ok" != 1 ] || ! python3 -c "import sys; sys.exit(0 if float('$elapsed') <= 2.0 else 1)"; then
-    echo "gate/watchdog were not both up within 2 seconds (elapsed ${elapsed}s). ESTOP was not cleared. grokbot was not started."
+    echo "gate/watchdog were not both up within 2 seconds (elapsed ${elapsed}s). ESTOP was not cleared. The maintenance lock was not cleared. grokbot was left running."
     exit 5
   fi
-  echo "gate and watchdog python processes were visible within ${elapsed}s."
+  echo "gate and watchdog python processes were visible within ${elapsed}s. grokbot was not stopped."
 else
-  echo "systemctl is not available. ESTOP was not cleared. No unit was restarted by a missing systemctl."
+  echo "systemctl is not available. ESTOP was not cleared. The maintenance lock was not cleared."
   exit 5
 fi
-
-echo "grokbot was not started. Default auto-clear would release a latch and speak, so this script leaves voice stopped when it stopped it."
+if [ ! -e "$DEST/data/MAINT" ]; then
+  echo "maintenance lock disappeared during restart. Not clearing ESTOP."
+  exit 5
+fi
+echo "Voice reload is not part of this command. Spoken stop stays with the running grokbot service."
+echo "A later reload requires SUPPRESS_STARTUP_SPEECH=1 and ESTOP_AUTOCLEAR_S=0. Empty greeting fields are not that switch."
+echo "Clear the maintenance lock only after checks, with deploy/maint_clear.sh. This script does not clear it."
 echo "No follow, no readiness phrase, no port 8080 change."
 exit 0

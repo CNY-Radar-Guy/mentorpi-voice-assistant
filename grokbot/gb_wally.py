@@ -112,15 +112,82 @@ def _obs():
 
 _runtime = False
 _publisher = None
+_follow = None
+_rt_stop = None
+_rt_thread = None
 
 
-def install_runtime(capture=None, publisher=None):
-    """Called by grokbot_voice.main. Tests leave this unset, so they never touch rosbridge."""
+def follow_loop():
+    global _follow
+    if _follow is None:
+        _follow = gb_follow.FollowLoop()
+    return _follow
+
+
+def install_runtime(capture=None, publisher=None, start_thread=False):
+    """Called by grokbot_voice.main. Tests leave the thread off so they never touch rosbridge."""
     global _runtime, _publisher
     _runtime = True
     if capture is not None:
         set_capture(capture)
     _publisher = publisher
+    if start_thread:
+        _start_runtime_thread()
+
+
+def _start_runtime_thread():
+    global _rt_stop, _rt_thread
+    if _rt_thread is not None:
+        return
+    _rt_stop = __import__("threading").Event()
+
+    def _loop():
+        while not _rt_stop.wait(0.2):
+            try:
+                tick_runtime()
+            except Exception:
+                pass
+
+    _rt_thread = __import__("threading").Thread(target=_loop, daemon=True)
+    _rt_thread.start()
+
+
+def tick_runtime(now=None):
+    """One follow step and one mission step. Publishes only through the injected gate publisher."""
+    now = time.time() if now is None else float(now)
+    protections = {}
+    try:
+        import gb_estop
+        import gb_maint
+        if gb_estop.is_set():
+            protections["estop"] = True
+        maint = gb_maint.is_set()
+    except Exception:
+        maint = False
+    fl = follow_loop()
+    if fl.active:
+        track = read_person_track(os.environ.get("PERSON_TRACK_FILE", ""), now)
+        cmd = fl.step(now, gb_health.read_shared(now=now), track, _autonomy, protections, maint=maint)
+        if cmd.get("allow") and (cmd.get("lin") or cmd.get("ang")):
+            _publish(cmd)
+        else:
+            _publish({"op": "stop", "allow": False, "reason": cmd.get("reason")})
+    m = mission()
+    if m.phase != "idle":
+        if maint or protections.get("estop"):
+            m.cancel("maintenance" if maint else "estop")
+            _publish({"op": "stop", "allow": False, "reason": "maintenance" if maint else "estop"})
+        else:
+            obs = _obs()
+            if obs.get("from_llm") or obs.get("from_vision"):
+                m.cancel("ungrounded")
+                _publish({"op": "stop", "allow": False, "reason": "ungrounded"})
+            else:
+                step = m.tick(0.2, obs, _health, protections)
+                if step.get("lin") or step.get("ang"):
+                    _publish({"allow": True, "op": "timed", "lin": step["lin"], "ang": step.get("ang") or 0.0})
+                else:
+                    _publish({"op": "stop", "allow": False, "reason": step.get("why") or step.get("phase")})
 
 
 def read_person_track(path, now=None):
@@ -146,7 +213,13 @@ def read_person_track(path, now=None):
     if p.get("unit") not in gb_health.VALIDATED_DEPTH_UNITS and p.get("source") != "lidar":
         return None
     source = "lidar" if p.get("source") == "lidar" else "depth"
-    return {"depth_m": dist, "source": source, "fresh": True, "bearing": float(p.get("bearing") or 0.0)}
+    try:
+        conf = float(p["conf"]) if "conf" in p else None
+    except (TypeError, ValueError):
+        conf = None
+    return {"depth_m": dist, "source": source, "fresh": True, "bearing": float(p.get("bearing") or 0.0),
+            "conf": conf, "ambiguous": bool(p.get("ambiguous")), "unit": p.get("unit"),
+            "depth_age": age if source == "depth" else 0.0}
 
 
 def follow_once(health_snap, track, autonomy, protections=None):
@@ -195,22 +268,38 @@ def handle(text, protections=None):
     if taught:
         return taught
     if re.search(r"\b(follow me|follow john|stay with me)\b", t):
-        # One decision. A continuous follow loop is not started here.
+        try:
+            import gb_maint
+            if gb_maint.is_set():
+                return "The maintenance lock is on, so I won't follow."
+        except Exception:
+            return "I couldn't check the maintenance lock, so I won't follow."
+        protections = dict(protections or {})
+        try:
+            import gb_estop
+            if gb_estop.is_set():
+                protections["estop"] = True
+        except Exception:
+            protections["estop"] = True
         if _observer and not os.environ.get("PERSON_TRACK_FILE"):
-            obs = _obs()
-            person = obs.get("person") or {}
-            src = person.get("source") or "none"
-            cmd = gb_follow.follow_command(person.get("depth_m"), src, person.get("bearing") or 0.0,
-                                            fresh=bool(person.get("fresh")), autonomy=_autonomy, protections=protections)
+            person = (_obs().get("person") or {})
+            track = person if person.get("fresh") else None
+            if track is not None and "conf" not in track:
+                track = dict(track, conf=track.get("conf"))
         else:
             track = read_person_track(os.environ.get("PERSON_TRACK_FILE", ""))
-            cmd = follow_once(gb_health.read_shared(), track, _autonomy, protections)
-        mission().commands.append({"lin": cmd["lin"], "ang": cmd["ang"], "why": "follow"})
+        fl = follow_loop()
+        now = time.time()
+        fl.start(now)
+        cmd = fl.step(now, gb_health.read_shared(now=now), track, _autonomy, protections, maint=False)
+        mission().commands.append({"lin": cmd.get("lin") or 0.0, "ang": cmd.get("ang") or 0.0, "why": "follow"})
         if cmd.get("allow") and (cmd.get("lin") or cmd.get("ang")):
             _publish(cmd)
-        if cmd["speech"]:
+        elif cmd.get("op") == "stop" and cmd.get("reason") not in ("person_lost", "person_gap", "autonomy_off", "confidence"):
+            _publish({"op": "stop", "allow": False, "reason": cmd.get("reason")})
+        if cmd.get("speech"):
             return cmd["speech"]
-        if cmd["lin"] or cmd["ang"]:
+        if cmd.get("lin") or cmd.get("ang"):
             return "I'll keep about 2 metres back."
         return "I'm holding about 2 metres."
     m = re.search(r"\b(?:go to|drive to|head to) (?:the |that )?([a-z0-9 ]+?)(?: and wait (\d+) seconds?)?$", t)

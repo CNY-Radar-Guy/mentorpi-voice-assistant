@@ -2,8 +2,10 @@
 
 ESTOP latch: /home/pi/grokbot/data/ESTOP (SSH: `touch ~/grokbot/data/ESTOP`). While it exists the gate refuses all
 motion and publishes zero at 10 Hz, the watchdog zeroes the motors, gb-guard does no manoeuvres, missions are killed.
-Only 'resume' / 'okay go' (also over the robot's own speech, echo-filtered) or deleting the file releases it, or the auto-clear: after ESTOP_AUTOCLEAR_S (15 s,
-0 = off) of being latched, AutoClear releases the latch ONLY (clear('auto')): it never resumes motion or a mission.
+A normal stop (voice, chat, manual file) stays until resume/unlock or a new qualifying move.
+A safety-fault latch (tilt, battery, watchdog, joystick button) is not cleared by a move or by resume.
+The timer ESTOP_AUTOCLEAR_S defaults to 0. A positive value is not the product unlock. AutoClear never
+resumes a goal. The maintenance file is a different latch and is not cleared here.
 Timed motion: parse_motion() -> {"op":"timed"|"turn",...}; gate_request() sends it ONCE; the gate owns the clock.
 """
 import json, os, re, threading, time, uuid
@@ -40,9 +42,14 @@ def _write(path, d):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f: json.dump(d, f)
 
-def estop(src="voice", why="", actions=None):
+_SAFETY_SRC = {"gate-tilt", "tilt", "battery", "watchdog", "physical", "joystick", "hardware"}
+
+
+def estop(src="voice", why="", actions=None, kind=None):
     """Latch the e-stop NOW (files first, then zero, then kill everything). Safe to call repeatedly."""
-    d = {"t": time.time(), "ts": time.strftime("%Y-%m-%d %H:%M:%S"), "src": src, "why": why[:200]}
+    if kind is None:
+        kind = "safety" if src in _SAFETY_SRC else "normal"
+    d = {"t": time.time(), "ts": time.strftime("%Y-%m-%d %H:%M:%S"), "src": src, "why": why[:200], "kind": kind}
     for p in (ESTOP, SHARED_ESTOP):
         try: _write(p, d)
         except Exception as ex: log("estop write failed", p, ex)
@@ -56,7 +63,20 @@ def estop(src="voice", why="", actions=None):
         threading.Thread(target=run, daemon=True).start()
     return True
 
-def clear(src="voice"):
+def clear(src="voice", only_normal=False):
+    """Remove the ESTOP files. only_normal refuses a safety-fault latch.
+
+    Never removes a MAINT file. Does not resume a goal.
+    """
+    if only_normal:
+        try:
+            import gb_unlock
+            if gb_unlock.latch_kind(info()) == "safety":
+                log("ESTOP safety latch not cleared by", src)
+                return False
+        except Exception as ex:
+            log("latch kind check failed", ex)
+            return False
     was = is_set()
     for p in (ESTOP, SHARED_ESTOP):
         try: os.remove(p)
@@ -441,10 +461,13 @@ def relatch_decision(text, t_onset, play_end, playing=False, spoken_texts=(), ta
 
 # ------------------------------------------------------------------ auto-clear (ESTOP_AUTOCLEAR_S)
 def autoclear_s(v=None):
-    """Seconds a latch must stand before it auto-clears. ESTOP_AUTOCLEAR_S (default 15); 0 (or negative) disables."""
-    v = E("ESTOP_AUTOCLEAR_S", "15") if v is None else v
-    try: return max(0.0, float(str(v).strip() or "15"))
-    except ValueError: return 15.0
+    """Seconds before a timer clear. Product default is 0 (disabled). Junk also disables.
+
+    A fresh move or resume/unlock clears a normal stop. The timer is not that unlock.
+    """
+    v = E("ESTOP_AUTOCLEAR_S", "0") if v is None else v
+    try: return max(0.0, float(str(v).strip() or "0"))
+    except ValueError: return 0.0
 
 def latch_sig(path=None):
     """Identity of the current latch (mtime_ns, size, t) or None if not latched. Every estop() / clap / touch rewrites
@@ -468,16 +491,24 @@ class AutoClear:
     def __init__(self, timeout=None, clock=time.time, on_clear=None):
         self.timeout = autoclear_s() if timeout is None else max(0.0, float(timeout))
         self.clock = clock; self.on_clear = on_clear; self.sig = None; self.since = None
+        self.born = self.clock(); self.hold = False
 
     def step(self):
         if self.timeout <= 0: return False
         sig = latch_sig()
         if sig is None:
-            self.sig = self.since = None; return False
+            self.sig = self.since = None; self.hold = False; return False
         now = self.clock()
         if sig != self.sig:                                  # first sight of this latch (or a re-latch): (re)start
             self.sig = sig; lt = latch_time(sig)
-            self.since = lt if lt <= now else now            # future stamp / clock jump: count from now
+            # Already expired before this process existed: keep it. A voice restart
+            # must not clear a normal stop. A latch written during this process still times out.
+            if lt + self.timeout < self.born:
+                self.hold = True; self.since = None
+            else:
+                self.hold = False
+                self.since = lt if lt <= now else now            # future stamp / clock jump: count from now
+        if self.hold: return False
         if now - self.since < self.timeout: return False
         if latch_sig() != sig: return False                  # re-latched this instant: next step restarts the timer
         clear("auto")

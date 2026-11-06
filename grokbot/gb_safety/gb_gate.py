@@ -33,6 +33,7 @@ IN_STREAM = E("GATE_IN", "/gb/cmd_in")
 REQ = E("GATE_REQ", "/gb/motion_req")
 STATUS = E("GATE_STATUS", "/gb/gate_status")
 ESTOP = E("GB_ESTOP_FILE", "/home/ubuntu/shared/gb_safety/ESTOP")
+MAINT = E("GB_MAINT_FILE", "/home/ubuntu/shared/gb_safety/MAINT")
 LOGF = E("GATE_LOG", "/home/ubuntu/shared/gb_safety/gate.log")
 DEADMAN = float(E("GATE_DEADMAN_S", "0.5"))
 ZERO_HOLD = float(E("GATE_ZERO_HOLD_S", "2.0"))
@@ -96,7 +97,7 @@ class Gate(Node):
         self.mode = "idle"; self.lin = 0.0; self.ang = 0.0; self.src = ""; self.rid = ""
         self.deadline = 0.0; self.t_start = 0.0; self.t_fresh = 0.0; self.zero_until = 0.0; self.last_zero = 0.0
         self.turn = None; self.yaw = None; self.yaw_src = None; self.yaw_t = 0.0
-        self.estop = os.path.exists(ESTOP); self.last_why = "start"; self.n_out = 0; self.last_pub = (None, None)
+        self.estop = os.path.exists(ESTOP); self.maint = os.path.exists(MAINT); self.last_why = "start"; self.n_out = 0; self.last_pub = (None, None)
         import collections; self.seen = collections.deque(maxlen=256)
         self.joy = {"present": False, "lin": 0.0, "ang": 0.0, "t": 0.0}
         self.create_timer(1.0 / HZ, self.tick)
@@ -230,6 +231,8 @@ class Gate(Node):
                     return                                    # backup stop for an earlier, already finished request
                 self.finish("stop request from %s" % src); return
             if op == "noop": return
+            if os.path.exists(MAINT):
+                self.log("REFUSED %s id=%s from %s: maintenance lock" % (op, rid, src)); return
             if self.estop:
                 self.log("REFUSED %s id=%s from %s: ESTOP latched" % (op, rid, src)); return
             if op == "timed":
@@ -270,6 +273,9 @@ class Gate(Node):
         now = time.time()
         with self.lock:
             lin = _clamp(m.linear.x, MAX_LIN); ang = _clamp(m.angular.z, MAX_ANG)
+            if os.path.exists(MAINT):
+                if lin or ang: self.log_throttle("REFUSED stream: maintenance lock")
+                return
             if self.estop:
                 if lin or ang: self.log_throttle("REFUSED stream: ESTOP latched")
                 return
@@ -306,7 +312,7 @@ class Gate(Node):
                 typ &= ~0x80
                 if typ == 1 and val and num in JOY_ESTOP_BTNS:
                     try:
-                        with open(ESTOP, "w") as f: json.dump({"t": time.time(), "src": "joystick", "why": "button %d" % num}, f)
+                        with open(ESTOP, "w") as f: json.dump({"t": time.time(), "src": "joystick", "kind": "safety", "why": "button %d" % num}, f)
                     except Exception as ex: self.log("joystick estop write failed: %s" % ex)
                     self.estop = True; self.finish("JOYSTICK ESTOP button %d" % num)
                 elif typ == 2:
@@ -345,7 +351,7 @@ class Gate(Node):
     def tilt_latch(self, why, src):
         """Hard tilt: ESTOP_REQ -> gb_safety_run.sh mirror writes the HOST latch (data/ESTOP, same as voice / clap),
         container ESTOP written too so this gate and the watchdog hold zero immediately."""
-        d = {"t": time.time(), "src": "gate-tilt", "why": why}
+        d = {"t": time.time(), "src": "gate-tilt", "kind": "safety", "why": why}
         for f in (os.path.join(os.path.dirname(ESTOP), "ESTOP_REQ"), ESTOP):
             try:
                 with open(f + ".tmp", "w") as fh: json.dump(d, fh)
@@ -388,6 +394,13 @@ class Gate(Node):
     def _tick_locked(self):
         now = time.time()
         with self.lock:
+            if os.path.exists(MAINT):
+                if not self.maint:
+                    self.maint = True; self.finish("MAINTENANCE lock")
+                if now - self.last_zero >= 0.09:
+                    self.send(0.0, 0.0); self.last_zero = now
+                return
+            self.maint = False
             e = os.path.exists(ESTOP)
             if e and not self.estop:
                 self.estop = True; self.finish("ESTOP file present")

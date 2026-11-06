@@ -84,7 +84,7 @@ for heard in ("Emergency stop.", "stop", "halt"):
 check("drive-then-stop exemption unchanged", not g.kill_phrase("forward for 10 seconds then stop", moving=True))
 pm = g.parse_motion("I want you to drive forward for 30 seconds")
 check("10 s cap / natural phrasing unchanged", bool(pm) and pm["dur"] == 10, g.describe(pm) if pm else "-")
-check("follow-up 20 s / autoclear 15 s unchanged", g.FOLLOWUP_WINDOW_S == 20 and g.autoclear_s() == 15)
+check("follow-up 20 s / autoclear default off", g.FOLLOWUP_WINDOW_S == 20 and g.autoclear_s() == 0)
 
 g.clear("test"); g.ESTOP = REAL_ESTOP
 check("real data/ESTOP untouched", os.path.exists(REAL_ESTOP) == real_before, "exists=%s" % os.path.exists(REAL_ESTOP))

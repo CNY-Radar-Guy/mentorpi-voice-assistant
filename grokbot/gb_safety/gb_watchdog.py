@@ -27,6 +27,7 @@ MOTOR_TOPIC = E("WD_MOTOR_TOPIC", "/ros_robot_controller/set_motor")
 MOTOR_OUT = E("WD_MOTOR_OUT", "/gb/wd_test_motor" if DRY else MOTOR_TOPIC)
 GATE_STATUS = E("WD_GATE_STATUS", "/gb/gate_status")
 ESTOP = E("GB_ESTOP_FILE", "/home/ubuntu/shared/gb_safety/ESTOP")
+MAINT = E("GB_MAINT_FILE", "/home/ubuntu/shared/gb_safety/MAINT")
 STALE = float(E("WD_STALE_S", "2.0"))
 IDLE_ZERO = float(E("WD_IDLE_ZERO_S", "1.0"))
 LOGF = E("WD_LOG", "/home/ubuntu/shared/gb_safety/watchdog%s.log" % ("_dry" if DRY else ""))
@@ -139,6 +140,8 @@ class WD(Node):
 
     def tick(self):
         now = time.time()
+        if os.path.exists(MAINT):
+            self.zero("maintenance"); return
         e = os.path.exists(ESTOP)
         if e != self.estop:
             self.log("ESTOP %s" % ("LATCHED -> zero at 10 Hz" if e else "cleared"))

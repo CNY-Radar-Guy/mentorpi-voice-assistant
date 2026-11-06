@@ -10,9 +10,7 @@ Running safety code already lives at `container:/home/ubuntu/shared/gb_safety/{g
 
 ## Port 8080
 
-The stock server is started by `ros2 launch bringup bringup.launch.py` inside the container. `GET /snapshot?topic=/ascamera/camera_publisher/rgb0/image` returned HTTP 200, a JPEG, 73327 bytes, 640x400. The stock root page links `stream_viewer` and snapshot for depth, rgb, ir, and hand_trajectory. That server has no proxy and no redirect. Port 8081 was free.
-
-This repository does not contain `bringup.launch.py`. The ROS parameter on `web_video_server` is `port`. No launch argument name is invented here. `deploy/port8080_migrate.sh` prints the remaining requirements and the inverse rollback, then refuses to apply, including when `WALLY_PORT8080_APPLY=1`. Restarting the whole bringup would restart the drivers, so that is not the migration. Until the parent finds a bringup argument that changes only the video-server port, 8080 stays unmet. An overlay on 8081 does not fulfill the phone root. `gb-front` and `gb-stream` stay inactive.
+The stock server is started by `ros2 launch bringup bringup.launch.py` with no arguments and no parameters: `Node(package='web_video_server', executable='web_video_server', output='screen')`. Package 1.0.0 reads `port` once on the private node `_web_video_server` and uses 8080 when that parameter is unset. There is no parameter callback. `ros2 param set` does not move the bind. A second process would also bind 8080, so this tree does not start one. `GET /snapshot?topic=/ascamera/camera_publisher/rgb0/image` returned HTTP 200, a JPEG, 73327 bytes, 640x400. Snapshots stay on that URL. The phone page on 8080 is unmet. `gb-front` and `gb-stream` stay inactive. An overlay on 8081 does not fulfill the phone root. Read-only probes are `ros2 param list /web_video_server` and that snapshot GET.
 
 `rclpy` is not installed for host Python. It imports inside the container. New ROS nodes have to use the existing `docker exec` wrapper. Do not start them with host `python3`.
 
@@ -24,14 +22,16 @@ Root was about 88% used with 6.6 GB free. The archive excludes data, models, voi
 | --- | --- | --- | --- |
 | Wake phrase exactly "wake up Wally" | Yes. Hello/Hey/bare Wally rejected in `gb_wally.classify_wake`, even if the env allow-list still contains `wally`. | Unit tests | Not spoken. WonderEcho firmware is still Hello Hiwonder and was not flashed. |
 | "I am John" | Not authentication. | Unit test | Not spoken. |
-| Emergency stop | Existing latch, phrases, clap, tip, watchdog. Not bypassed by teleop. | Phrase tests and policy tests | Already active on the Pi. This archive does not restart it. |
+| Normal stop | Voice or manual stop stays until resume/unlock or a new fresh teleop command. The timer defaults to 0. A latch that predates the process is kept across restart. Stop words in the same utterance block the unlock. Negated, quoted, hypothetical, stale, replayed, and model text do not unlock. | `test_policy.py` | Live `ESTOP_AUTOCLEAR_S` is still 15 until the parent runs the env migration. This archive does not edit the live file. |
+| Safety fault | Tilt, battery, watchdog, and the joystick button write `kind: safety`. A drive command and resume do not clear that file. | Policy test | Not restarted here. |
+| Maintenance lock | `data/MAINT`, also mirrored to the shared mount. Gate and watchdog zero every source, including the joystick. Resume, a move, and the 15 s timer do not clear it. | Policy test and source check | Not created on the Pi by this archive. |
 | Autonomous drive | Default off (`ALLOW_AUTONOMY=0`). Gate fails closed without a fresh validated health file. Joystick is the only teleop source. | Unit tests of the policy | Not accepted. Do not enable it for these checks. |
 | LiDAR / depth health speech | Monitor code exists. Depth is not an autonomous range until the unit is `crosscheck_mm`, `crosscheck_m`, or `32FC1_metres` and coverage is at least half the samples. | Synthetic samples | Live sensors were healthy at 10 Hz and 12 Hz. This tree has not announced the phrases on the speaker. |
 | User LiDAR off switch | A boolean `lidar: false` in caps.json is kept. Malformed JSON is not rewritten to on. | Unit test | Live caps were both true. This archive does not write caps.json. |
 | Object teaching | `gb_wally.handle` calls the teacher. `grokbot_voice.main` installs a capture that decodes `gb_robot.snapshot()` (the existing JPEG URL). | Synthetic images, plus a source check that main installs that capture | Not spoken. A failed snapshot does not save an object. |
-| Pointed mission | State machine in `gb_point.py`, reached from `handle`. Ambiguous targets do not drive. | Synthetic ticks | Not a ROS timer and not published to the gate. That loop is not started. |
+| Pointed mission | `PointMission` is ticked by the voice runtime while a mission is active, and a non-zero step is sent to the gate. A target needs one fresh measured depth, confidence at least 0.55, and no model caption. Map coordinates are kept only when the observation already has them. Return without a pose fix stops. The Nav2 action client is not opened. | Synthetic ticks and `ground_observation` | Not driven. No live candidate file was attached. |
 | Speech cadence | The voice loop calls `gb_cadence.observe`. Piper `tts()` uses `current_scale()`. The xAI TTS body has no speed field, so a cloud voice does not change rate. | Numeric test | Not spoken. |
-| 2 m follow | `follow_once` reads the health file and `PERSON_TRACK_FILE`. No file, no range, no motion. One allowed step can go to the gate as `src=wally` for 0.25 s. There is no follow loop. | Unit test with a fresh health file and a lidar track | Not driven. Do not start a long follow. |
+| 2 m follow | `FollowLoop` stays active and is stepped every 0.2 s by the voice runtime. It cancels on loss, low confidence, ambiguity, stale depth, timeout, estop, and the maintenance lock. It does not invent a range. | Loop tests | Not driven. Nothing in this tree writes a metric `PERSON_TRACK_FILE` yet. |
 | Phone overlay | `gb_stream.py` would listen on 8081. `gb_front.py` would forward `/` there and `/snapshot?topic=` to a snapshot upstream, only when 8080 is free and that upstream already returns a JPEG. | Decision tests | 8080 is unmet. Both units stay inactive. Not viewed on a phone. |
 | Safety service wiring | Launchers copy only after live `.Mounts` match. A fast path exists for the activation window. | Stale-bind versus live-mount tests | Live units are already active. Apply does not restart them. |
 
@@ -39,7 +39,7 @@ Unit tests are not acceptance.
 
 ## Measurements on this workspace, not the Pi
 
-`python3 grokbot/tests/test_handoff.py` — 56 passed, 0 failed. `python3 grokbot/tests/test_wally.py` — 130 passed, 0 failed. This run's simulated loop medians were idle 0.000097 s, push 0.000099 s, draw 0.000131 s.
+`python3 grokbot/tests/test_policy.py` — 39 passed, 0 failed. `python3 grokbot/tests/test_handoff.py` — 57 passed, 0 failed. `python3 grokbot/tests/test_wally.py` — 130 passed, 0 failed. `python3 grokbot/tests/test_autoclear.py` — 18 passed, 0 failed. This run's simulated loop medians were idle 0.000090 s, push 0.000097 s, draw 0.000104 s.
 
 A simulated 5 ms loop, 30 iterations, printed median iteration time. Earlier runs:
 
@@ -61,7 +61,7 @@ That is a dry run. It does not copy and does not restart anything.
 
 `WALLY_DEPLOY_APPLY=1 deploy/wally_deploy.sh`
 
-Apply copies host modules, writes the backup path to `~/grokbot/.wally-last-code-backup`, and migrates only `WAKE_*` lines in `grokbot.env`. The wake migration records its own backup path in `~/grokbot/.wally-last-wake-backup`. Safety files stay in place when live `.Mounts` show `/home/pi/docker/tmp` -> `/home/ubuntu/shared`. If that check fails, those safety files are put back from the backup just taken. Apply does not restart services, does not play audio, and does not write `secrets.env` or `caps.json`.
+Apply copies host modules, writes the backup path to `~/grokbot/.wally-last-code-backup`, migrates only `WAKE_*` lines, and sets `ESTOP_AUTOCLEAR_S=0` with its own backup. It does not change `WAKE_ACK` or `STARTUP_GREETING`. The live file has both of those empty. Safety files stay in place when live `.Mounts` show `/home/pi/docker/tmp` -> `/home/ubuntu/shared`. If that check fails, those safety files are put back from the backup just taken. Apply does not restart services, does not play audio, and does not write `secrets.env` or `caps.json`.
 
 ## Activation
 
@@ -71,7 +71,7 @@ On the Pi, after the apply, and only if you want the safety processes reloaded:
 
 `WALLY_ACTIVATE=1 deploy/wally_activate.sh`
 
-The script publishes zero Twist on `/controller/cmd_vel` before the restart. If `data/ESTOP` is missing it stops grokbot first, so the voice process cannot speak a rising-edge "Emergency stop.", then it creates a latch. An existing latch is not rewritten and is not deleted. It restarts `gb-gate` and `gb-watchdog` only, and exits with an error if both Python processes are not visible within 2 seconds. It does not start grokbot again: the default 15 second auto-clear would release the latch and speak. It does not play a readiness phrase, does not follow, and does not change port 8080.
+The script writes `data/MAINT` and the shared copy, publishes zero Twist, then restarts `gb-gate` and `gb-watchdog` only. It leaves `grokbot` running so wake and the spoken stop listener stay up. It does not create or delete `data/ESTOP`. It exits with an error if both Python processes are not visible within 2 seconds. The maintenance lock stays until `WALLY_MAINT_CLEAR=1 deploy/maint_clear.sh`. A drive command and resume do not clear it. Empty `STARTUP_GREETING` is not a suppress switch; a later voice reload needs `SUPPRESS_STARTUP_SPEECH=1`. It does not play a readiness phrase, does not follow, and does not change port 8080.
 
 ## Rollback
 

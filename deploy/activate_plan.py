@@ -18,24 +18,20 @@ def parse_env(text):
 
 
 def voice_restart_allowed(env_text, estop_present=False):
-    """A grokbot restart stays silent and does not release a latch by itself.
+    """Empty greeting fields are not enough. The suppress switch must be set.
 
-    Default ESTOP_AUTOCLEAR_S is 15. Starting the voice process while a latch
-    exists would have AutoClear delete that latch and speak. This plan refuses
-    that unless auto-clear is already off.
+    A reload is optional. The default activation leaves grokbot running so the
+    spoken stop listener stays up. This function does not clear a latch.
     """
+    del estop_present
     vals = parse_env(env_text)
-    if vals.get("STARTUP_GREETING", ""):
-        return False, "STARTUP_GREETING would speak on restart"
-    if vals.get("TTS_WARMUP", "0") == "1":
-        return False, "TTS_WARMUP=1 would speak on restart"
-    if vals.get("HEALTH_SPEAK", "0") == "1":
-        return False, "HEALTH_SPEAK=1 would speak on restart"
+    if vals.get("SUPPRESS_STARTUP_SPEECH", "0") != "1":
+        return False, "SUPPRESS_STARTUP_SPEECH=1 is required; empty greeting fields are not a guarantee"
     if vals.get("ALLOW_AUTONOMY", "0") == "1":
         return False, "ALLOW_AUTONOMY=1 is not part of this activation"
-    if estop_present and vals.get("ESTOP_AUTOCLEAR_S", "15") != "0":
-        return False, "ESTOP is latched and ESTOP_AUTOCLEAR_S is not 0; starting grokbot would auto-clear it and speak"
-    return True, "silent startup preserved; this plan does not clear an ESTOP latch"
+    if vals.get("ESTOP_AUTOCLEAR_S", "0") not in ("0", ""):
+        return False, "ESTOP_AUTOCLEAR_S must be 0 before a voice reload"
+    return True, "startup speech is suppressed; a normal stop latch is not cleared by the reload"
 
 
 def write_transition_latch(paths, now=None):
@@ -74,11 +70,11 @@ def within_window(elapsed_s, limit=2.0):
 
 PLAN = (
     "Read live docker inspect .Mounts and, when readable, /proc/1/mountinfo. Abort with no service changes if /home/pi/docker/tmp is not the live source of /home/ubuntu/shared.",
-    "Start a zero Twist publisher on /controller/cmd_vel before any safety process is stopped.",
-    "If data/ESTOP is absent, stop grokbot first so the rising-edge reactor cannot speak, then create the latch. Never rewrite or delete an existing latch.",
-    "Restart gb-gate and gb-watchdog only. Both Python processes must be visible within 2 seconds.",
-    "If that window is missed, leave the latch in place and do not start grokbot.",
-    "Do not restart grokbot from this script. A restart can speak, and the default 15 second auto-clear would release the latch.",
+    "Write the maintenance lock on the host and the shared mount. Do not create or delete data/ESTOP.",
+    "Start a zero Twist publisher on /controller/cmd_vel before gb-gate or gb-watchdog is restarted.",
+    "Restart gb-gate and gb-watchdog only. Both Python processes must be visible within 2 seconds, and the maintenance lock must still be present. Leave grokbot running so the spoken stop listener stays up.",
+    "A voice reload is separate and only when SUPPRESS_STARTUP_SPEECH=1 and ESTOP_AUTOCLEAR_S=0. Empty STARTUP_GREETING is not that switch. The reload must not clear ESTOP or MAINT.",
+    "The maintenance lock stays until an explicit post-check clear. Resume, a drive command, and the old 15 second timer do not clear it.",
     "Do not start a follow, do not play a readiness phrase, and do not move web_video_server. Port 8080 stays unmet.",
 )
 
@@ -105,6 +101,13 @@ def main(argv):
         created = write_transition_latch(argv[2:])
         print("created " + " ".join(created) if created else "unchanged")
         return 0
+    if cmd == "maint":
+        import os as _os
+        sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "grokbot"))
+        import gb_maint
+        created = gb_maint.write_lock(argv[2:])
+        print("created " + " ".join(created) if created else "unchanged")
+        return 0 if any(_os.path.lexists(p) for p in argv[2:]) else 1
     print("unknown command", file=sys.stderr)
     return 2
 

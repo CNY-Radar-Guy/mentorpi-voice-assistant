@@ -754,18 +754,55 @@ def do_estop(why="", src="voice"):
     return "Emergency stop. Motors are latched off. Say unlock or resume when it's safe. I will not continue the old trip."
 
 def do_resume():
-    """Unlock clears the latch only. It does not resume a goal, a follow, or a mission."""
+    """Unlock clears a normal stop only. It does not resume a goal, a follow, or a mission."""
+    try:
+        import gb_maint
+        if gb_maint.is_set():
+            return "The maintenance lock is still on. Resume does not clear it, and I am not moving."
+    except Exception as ex:
+        log("maintenance check failed:", ex)
+        return "I couldn't check the maintenance lock, so I'm not moving."
     try:
         import gb_wally
         gb_wally.drop_goals("unlock")
     except Exception as ex:
         log("drop goals failed:", ex)
-    if gb_estop.clear("voice"):
+    if gb_estop.clear("voice", only_normal=True):
         return "Unlocked. I am not resuming the last trip. Give me a new command."
+    if gb_estop.is_set():
+        return "That stop is a safety fault. A drive command will not clear it."
     return "I wasn't latched. I'm not moving."
 
 def do_timed(p):
-    """Timed drive / turn: ONE request to the gate; the gate owns the deadline (default 3 s, hard cap 10 s)."""
+    """Timed drive / turn: ONE new command. A normal stop can unlock. A safety fault cannot."""
+    import gb_unlock
+    prov = gb_unlock.fresh_provenance(p.get("requested") or "", source="voice")
+    latch = gb_estop.info() if gb_estop.is_set() else None
+    try:
+        import gb_maint
+        maint = gb_maint.is_set()
+    except Exception:
+        maint = True
+    gates = {"maint": maint, "allow_motion": bool(ALLOW_MOTION), "autonomous": False}
+    if latch and latch.get("kind") == "safety":
+        gates["physical"] = latch.get("src") in ("joystick", "physical", "hardware")
+        if latch.get("src") in ("gate-tilt", "tilt"):
+            gates["tip_hard"] = True
+        if latch.get("src") == "battery":
+            gates["battery_shutdown"] = True
+        if latch.get("src") == "watchdog":
+            gates["watchdog"] = True
+    decision = gb_unlock.decide(p.get("requested") or "", prov, latch, gates, motion=p)
+    if not decision["allow"]:
+        return decision["say"]
+    if decision["unlock"]:
+        if not gb_estop.clear("move-intent", only_normal=True):
+            return "That stop is a safety fault. A drive command will not clear it."
+        try:
+            import gb_wally
+            gb_wally.drop_goals("move-intent")
+        except Exception as ex:
+            log("drop goals failed:", ex)
     if gb_estop.is_set():
         return "I'm emergency-latched, so I won't move. Say resume first."
     if not ALLOW_MOTION:
@@ -1602,8 +1639,8 @@ def voice_loop():
         stt(pcm_to_wav(b"\0" * RATE)); stt(pcm_to_wav(b"\0" * RATE), idle=True)   # load both whisper models
     except Exception as ex:
         log("whisper load failed:", ex)
-    greet = E("STARTUP_GREETING", "")   # empty unless the env sets one; sanity boots stay quiet
-    if greet.strip(): speak(greet)
+    greet = E("STARTUP_GREETING", "")   # live file is empty; emptiness alone is not the suppress switch
+    if greet.strip() and E("SUPPRESS_STARTUP_SPEECH", "0") != "1": speak(greet)
     mic = Mic(); awake_until = 0.0; followup = False
     prompt = E("WAKE_PROMPT", "Wake up Wally.")
     while True:
@@ -1821,7 +1858,7 @@ def _health_monitor():
     """
     import gb_wally, gb_health
     h = gb_wally.health()
-    speak_ok = E("HEALTH_SPEAK", "0") == "1"
+    speak_ok = E("HEALTH_SPEAK", "0") == "1" and E("SUPPRESS_STARTUP_SPEECH", "0") != "1"
     while True:
         lidar = {"fresh": False, "valid_frac": 0.0, "driver_ok": False, "fault": "no sample"}
         depth = {"fresh": False, "valid_frac": 0.0, "unit_ok": False, "fault": "no sample"}
@@ -1886,13 +1923,19 @@ def _install_wally_runtime():
         return [px[i * 9:(i + 1) * 9] for i in range(8)], None
 
     def publish(cmd):
-        if not cmd.get("allow") or gb_estop.is_set():
+        try:
+            import gb_maint
+            if gb_maint.is_set():
+                return gb_estop.gate_request({"op": "stop", "src": "wally"})
+        except Exception:
             return None
+        if not cmd.get("allow") or cmd.get("op") == "stop" or gb_estop.is_set() or not (cmd.get("lin") or cmd.get("ang")):
+            return gb_estop.gate_request({"op": "stop", "src": "wally"})
         return gb_estop.gate_request({
             "op": "timed", "lin": float(cmd.get("lin") or 0), "ang": float(cmd.get("ang") or 0),
-            "dur": 0.25, "src": "wally"})
+            "dur": 0.3, "src": "wally", "id": (cmd.get("provenance") or {}).get("id")})
 
-    gb_wally.install_runtime(capture=capture, publisher=publish)
+    gb_wally.install_runtime(capture=capture, publisher=publish, start_thread=True)
 
 
 def main():
@@ -1906,7 +1949,7 @@ def main():
         log("banner: %s" % gb_caps.startup_banner(None, st))
     except Exception as ex: log("caps sync failed:", ex)
     threading.Thread(target=seed_watcher, daemon=True).start()
-    if E("TTS_WARMUP", "0") == "1":
+    if E("TTS_WARMUP", "0") == "1" and E("SUPPRESS_STARTUP_SPEECH", "0") != "1":
         threading.Thread(target=lambda: tts("warm up"), daemon=True).start()
     threading.Thread(target=_playback_poller, daemon=True, name="playback_poller").start()
     threading.Thread(target=estop_reactor, daemon=True, name="estop_reactor").start()

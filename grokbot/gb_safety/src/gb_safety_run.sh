@@ -41,6 +41,7 @@ mkdir -p "$SH" "$GB/data"
 cp -f "$GB/gb_safety/gb_$WHAT.py" "$SH/gb_$WHAT.py"
 cp -f "$GB/gb_obstacle.py" "$SH/gb_obstacle.py"            # 2026-11-05: obstacle fusion shared by gate + explore
 cp -f "$GB/gb_health.py" "$SH/gb_health.py"                # ranging mode for autonomous vs teleop
+cp -f "$GB/gb_maint.py" "$SH/gb_maint.py"                  # maintenance lock, not the ESTOP timer
 NICE=""
 if [ "$WHAT" = rgbguard ]; then
   cp -f "$GB/models/yolov8n.onnx" "$SH/yolov8n.onnx"; NICE="nice -n 12"   # advisory only: never starve the safety loop
@@ -64,6 +65,11 @@ mirror() {
     else
       [ -e "$SH/ESTOP" ] && rm -f "$SH/ESTOP" && log "ESTOP cleared"
       was=0
+    fi
+    if [ -e "$GB/data/MAINT" ]; then
+      cp -f "$GB/data/MAINT" "$SH/MAINT" 2>/dev/null || true
+    elif [ -e "$SH/MAINT" ]; then
+      rm -f "$SH/MAINT" && log "MAINT cleared on host -> removed container copy"
     fi
     sleep 0.05
   done

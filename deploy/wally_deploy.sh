@@ -96,6 +96,7 @@ fi
 
 if [ -f "$DEST/grokbot.env" ]; then
   python3 "$ROOT/deploy/migrate_wake_env.py" "$DEST/grokbot.env"
+  python3 "$ROOT/deploy/migrate_autoclear.py" "$DEST/grokbot.env"
 else
   echo "no grokbot.env to migrate; code defaults apply and secrets.env was not touched"
 fi

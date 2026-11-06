@@ -30,8 +30,9 @@ clk = [1000.0]; said = []
 def mk(timeout=15): return g.AutoClear(timeout, clock=lambda: clk[0], on_clear=lambda: said.append(clk[0]))
 
 # 1 config
-check("ESTOP_AUTOCLEAR_S parse: 15 / 0 / -3 / junk", (g.autoclear_s("15"), g.autoclear_s("0"), g.autoclear_s("-3"), g.autoclear_s("x")) == (15, 0, 0, 15),
+check("ESTOP_AUTOCLEAR_S parse: 15 / 0 / -3 / junk", (g.autoclear_s("15"), g.autoclear_s("0"), g.autoclear_s("-3"), g.autoclear_s("x")) == (15, 0, 0, 0),
       (g.autoclear_s("15"), g.autoclear_s("0"), g.autoclear_s("-3"), g.autoclear_s("x")))
+check("product default timer is off", g.autoclear_s() == 0)
 # 2 does not clear before the timeout, clears at it
 ac = mk(); latch(1000.0)
 r = []
@@ -46,7 +47,7 @@ check("logs 'ESTOP CLEARED by auto' + 'ESTOP AUTO-CLEARED after 15s'", "ESTOP CL
       [l[20:] for l in lg.splitlines()])
 clk[0] = 1100.0; check("nothing to do once clear", ac.step() is False and said == [1015.0])
 # 3 a re-latch resets the timer
-said.clear(); ac = mk(); latch(1000.0); clk[0] = 1010.0; ac.step()
+said.clear(); clk[0] = 1000.0; ac = mk(); latch(1000.0); clk[0] = 1010.0; ac.step()
 latch(1010.0)                                  # new stop 10 s into the first latch
 r = []
 for t in (1015.0, 1020.0, 1024.9):
@@ -54,7 +55,7 @@ for t in (1015.0, 1020.0, 1024.9):
 check("re-latch at 10 s: still latched at 15/20/24.9 s", r == [False] * 3 and g.is_set(), r)
 clk[0] = 1025.0; check("re-latch: cleared 15 s after the NEW stop (25 s)", ac.step() and both_gone() and said == [1025.0], said)
 # 4 re-latch exactly when the old timer expires (same t, different file identity) still restarts
-said.clear(); ac = mk(); latch(1000.0); clk[0] = 1001.0; ac.step(); latch(1014.0)
+said.clear(); clk[0] = 1000.0; ac = mk(); latch(1000.0); clk[0] = 1001.0; ac.step(); latch(1014.0)
 clk[0] = 1015.0; r1 = ac.step(); clk[0] = 1029.0; r2 = ac.step()
 check("re-latch at 14 s: not cleared at 15 s, cleared at 29 s", (r1, r2) == (False, True), (r1, r2))
 # 5 0 disables
@@ -65,11 +66,13 @@ for t in (1015.0, 1100.0, 10 ** 6):
 check("ESTOP_AUTOCLEAR_S=0: never clears", r == [False] * 3 and g.is_set() and not said, r)
 g.clear("test")
 # 6 SSH 'touch' latch (no JSON) times from the file mtime
-ac = mk(); latch(1000.0, touch=True); clk[0] = 1014.0; r1 = ac.step(); clk[0] = 1015.0; r2 = ac.step()
+clk[0] = 1000.0; ac = mk(); latch(1000.0, touch=True); clk[0] = 1014.0; r1 = ac.step(); clk[0] = 1015.0; r2 = ac.step()
 check("touched (empty) latch: mtime-based, clears at 15 s", (r1, r2) == (False, True) and both_gone(), (r1, r2))
-# 7 latch older than 15 s when the thread starts (e.g. after a restart): clears on first check
-ac = mk(); latch(900.0); clk[0] = 1000.0
-check("latch already 100 s old at startup: cleared on first check", ac.step() and both_gone())
+# 7 latch older than this process: a restart must not clear it
+clk[0] = 1000.0; ac = mk(); latch(900.0); clk[0] = 1000.0
+check("latch that predates this process survives restart", ac.step() is False and g.is_set())
+clk[0] = 2000.0
+check("preexisting latch is not cleared later by the timer", ac.step() is False and g.is_set())
 # 8 future stamp (clock jump) counts from now
 ac = mk(); latch(5000.0); clk[0] = 1000.0; r1 = ac.step(); clk[0] = 1014.0; r2 = ac.step(); clk[0] = 1015.0; r3 = ac.step()
 check("future-stamped latch: counts from first sight", (r1, r2, r3) == (False, False, True), (r1, r2, r3))

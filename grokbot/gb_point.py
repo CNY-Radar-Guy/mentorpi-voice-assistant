@@ -17,7 +17,7 @@ LGPL-2.1 and is not copied here.
 Localization loss, timeout, person-lost on the return, cancel, estop, and
 loss of both range sensors all zero the output and drop the goal.
 """
-import json, os, time
+import json, math, os, time
 import gb_health
 
 CONTACT_STOP_M = 0.40
@@ -35,16 +35,84 @@ class Nav2Transport(object):
 
 
 def navigate_to_pose_goal(x, y, yaw=0.0, frame="map"):
-    """Goal shape compatible with nav2_msgs/NavigateToPose. Not a copy of Nav2 source."""
+    """Goal shape compatible with nav2_msgs/NavigateToPose. Not a copy of Nav2 source.
+
+    x and y must already be measured. Yaw is encoded as a quaternion. This does
+    not invent a waypoint.
+    """
+    half = float(yaw) / 2.0
     return {
         "action": "navigate_to_pose",
         "pose": {
             "header": {"frame_id": frame},
             "pose": {
                 "position": {"x": float(x), "y": float(y), "z": 0.0},
-                "orientation": {"z": float(yaw), "w": 1.0},
+                "orientation": {"x": 0.0, "y": 0.0, "z": math.sin(half), "w": math.cos(half)},
             },
         },
+    }
+
+
+def _finite(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return number == number and abs(number) < 1e6
+
+
+def ground_observation(raw, now=None):
+    """Drop anything that is not a fresh measurement. Never fills in x, y, or depth."""
+    now = time.time() if now is None else float(now)
+    raw = raw or {}
+    if raw.get("from_llm") or raw.get("from_vision"):
+        return {"candidates": [], "person": None, "localized": False, "tf_ok": False,
+                "camera_ok": False, "from_llm": True, "from_vision": bool(raw.get("from_vision")), "start": None}
+    kept = []
+    for cand in raw.get("candidates") or []:
+        if not isinstance(cand, dict) or cand.get("from_llm") or cand.get("from_vision"):
+            continue
+        try:
+            conf = float(cand.get("conf") or 0)
+        except (TypeError, ValueError):
+            continue
+        if conf < TARGET_CONF or not cand.get("depth_valid") or cand.get("depth_m") is None:
+            continue
+        if "depth_t" in cand:
+            try:
+                if now - float(cand["depth_t"]) > 0.5:
+                    continue
+            except (TypeError, ValueError):
+                continue
+        if cand.get("source") == "depth" and cand.get("unit") not in gb_health.VALIDATED_DEPTH_UNITS:
+            continue
+        item = dict(cand)
+        if not (_finite(cand.get("x")) and _finite(cand.get("y"))):
+            item.pop("x", None)
+            item.pop("y", None)
+        kept.append(item)
+    pose = raw.get("pose") if isinstance(raw.get("pose"), dict) else None
+    tf_ok = bool(pose and pose.get("fresh") and pose.get("frame") in ("map", "odom") and _finite(pose.get("x")) and _finite(pose.get("y")))
+    localized = bool(tf_ok and pose.get("frame") == "map")
+    start = None
+    if localized:
+        start = {"x": float(pose["x"]), "y": float(pose["y"]), "yaw": float(pose.get("yaw") or 0.0)}
+    person = raw.get("person") if isinstance(raw.get("person"), dict) else None
+    if person and (person.get("from_llm") or not person.get("fresh")):
+        person = None
+    camera_ok = raw.get("camera_ok")
+    if camera_ok is None:
+        camera_ok = bool(raw.get("camera_t") and now - float(raw.get("camera_t") or 0) <= 0.5)
+    return {
+        "candidates": kept,
+        "person": person,
+        "localized": localized,
+        "tf_ok": tf_ok,
+        "camera_ok": bool(camera_ok),
+        "from_llm": False,
+        "from_vision": False,
+        "start": start,
+        "pose": pose if tf_ok else None,
     }
 
 
@@ -166,7 +234,9 @@ class PointMission(object):
         self._t_phase = 0.0
         self._dwell_left = self.goal["dwell_s"]
         self._status("running-not-a-goal")
-        if self.use_nav2 and health.mode == "lidar" and self.transport is not None and c.get("x") is not None:
+        measured = _finite(c.get("x")) and _finite(c.get("y"))
+        if (self.use_nav2 and health.mode == "lidar" and self.transport is not None and measured
+                and obs.get("tf_ok") and obs.get("localized") and not obs.get("from_llm") and not obs.get("from_vision")):
             g = navigate_to_pose_goal(c["x"], c["y"])
             self.nav_goals.append(g)
             try:
@@ -245,11 +315,15 @@ class PointMission(object):
                 self.commands.append(cmd)
                 return cmd
         if self.phase == "return_start":
-            if not obs.get("localized", False):
+            if not obs.get("localized", False) or not obs.get("tf_ok", obs.get("localized", False)):
                 self.speech.append("I lost localization, so I stopped.")
                 return self.cancel("localization")
             if self._t_phase > RETURN_MAX_S:
                 return self.cancel("timeout")
+            pose = obs.get("pose")
+            if not isinstance(pose, dict) or not (_finite(pose.get("x")) and _finite(pose.get("y"))):
+                self.speech.append("I don't have a pose fix, so I stopped.")
+                return self.cancel("tf")
             # Without a live odometry stream the synthetic world says arrived via obs.start_arrived.
             if obs.get("start_arrived"):
                 cmd = {"lin": 0.0, "ang": 0.0, "phase": "done", "why": "start_pose"}
