@@ -51,7 +51,7 @@ class RgbGuard(Node):
         cv2.setNumThreads(2)
         self.net = cv2.dnn.readNetFromONNX(MODEL)
         self.moving = False; self.idle_since = time.time(); self.sub = None; self.depth_sub = None; self.info_sub = None
-        self.img = None; self.img_t = 0.0; self.depth = None; self.depth_t = 0.0; self.k = None; self.done_t = 0.0
+        self.img = None; self.img_t = 0.0; self.depth = None; self.depth_t = 0.0; self.k = None; self.scan = None; self.done_t = 0.0
         self._last_infer = 0.7; self._held_motion = False
         self.create_subscription(String, "/gb/gate_status", self.on_status, 10)
         self.create_timer(0.5, self.manage)
@@ -88,6 +88,8 @@ class RgbGuard(Node):
         want_depth = self.moving or mode in ("follow", "point", "acquire")
         if want and self.sub is None:
             self.sub = self.create_subscription(Image, TOPIC, self.on_img, qos_profile_sensor_data)
+            from sensor_msgs.msg import LaserScan
+            self.scan_sub = self.create_subscription(LaserScan, E("GATE_SCAN", "/scan_raw"), self.on_scan, qos_profile_sensor_data)
         if want_depth and self.depth_sub is None and self.sub is not None:
             self.depth_sub = self.create_subscription(Image, E("GB_DEPTH_TOPIC", "/ascamera/camera_publisher/depth0/image_raw"), self.on_depth, qos_profile_sensor_data)
             from sensor_msgs.msg import CameraInfo
@@ -97,8 +99,15 @@ class RgbGuard(Node):
         if not want and self.sub is not None:
             hold = 3.0 if self._held_motion else 0.0
             if self.idle_since and time.time() - self.idle_since >= hold:
-                self._drop_sub("sub"); self._drop_sub("depth_sub"); self._drop_sub("info_sub")
-                self.img = None; self.depth = None; self._held_motion = False
+                self._drop_sub("sub"); self._drop_sub("depth_sub"); self._drop_sub("info_sub"); self._drop_sub("scan_sub")
+                self.img = None; self.depth = None; self.scan = None; self._held_motion = False
+
+    def on_scan(self, m):
+        beams = []
+        for i, r in enumerate(m.ranges):
+            if r == r and 0.05 < float(r) < 30.0:
+                beams.append((float(m.angle_min) + i * float(m.angle_increment), float(r)))
+        self.scan = (time.time(), beams)
 
     def on_img(self, m):
         self.img = m; self.img_t = time.time()                # keep only the newest frame; inference runs elsewhere
@@ -119,7 +128,8 @@ class RgbGuard(Node):
             sx, sy = w / float(SIZE), h / float(SIZE)
             xy = np.stack([(b[:, 0] - b[:, 2] / 2) * sx, (b[:, 1] - b[:, 3] / 2) * sy, b[:, 2] * sx, b[:, 3] * sy], 1)
             for i in np.array(cv2.dnn.NMSBoxes(xy.tolist(), cf.tolist(), CONF, 0.45)).flatten():
-                x1, y1, bw, bh = xy[i]; res.append((COCO[ci[i]], float(cf[i]), x1, y1, x1 + bw, y1 + bh))
+                x1, y1, bw, bh = [float(v) for v in xy[i]]
+                res.append((COCO[int(ci[i])], float(cf[i]), x1, y1, x1 + bw, y1 + bh))
         return res
 
     def worker(self):
@@ -147,11 +157,33 @@ class RgbGuard(Node):
                     d["person"] = {"t": frame_t, "conf": round(float(cf), 2),
                                    "box": [round(float(x1), 1), round(float(y1), 1), round(float(x2), 1), round(float(y2), 1)],
                                    "wh": [m.width, m.height]}
-                self._write_metric(people, m, frame_t)
-                with open(OUT + ".tmp", "w") as f: json.dump(d, f)
-                os.replace(OUT + ".tmp", OUT)
+                try:
+                    self._write_metric(people, m, frame_t)
+                except Exception as ex:
+                    self.get_logger().warn("person track write failed: %s" % ex)
+                import gb_metric
+                gb_metric.dump_json(OUT, d)
             except Exception as ex:
                 self.get_logger().warn("rgb guard frame failed: %s" % ex); time.sleep(1.0)
+
+    def _lidar_obs(self, people):
+        """Calibrated beam at the box bearing, or None. Does not use the forward minimum."""
+        if len(people) != 1 or self.k is None or not self.scan:
+            return None
+        age = time.time() - self.scan[0]
+        try:
+            import gb_metric
+            import gb_paths
+            cal = None
+            try:
+                with open(gb_paths.extrinsics_path()) as f:
+                    cal = json.load(f)
+            except (OSError, ValueError):
+                cal = None
+            box = [people[0][2], people[0][3], people[0][4], people[0][5]]
+            return gb_metric.range_for_detection(box, self.k[0], self.k[2], self.scan[1], cal, age)
+        except Exception:
+            return None
 
     def _write_metric(self, people, image, frame_t):
         """Demand-driven range. Same YOLO pass. No second model and no invented distance."""
@@ -163,11 +195,11 @@ class RgbGuard(Node):
         if mode not in ("follow", "point", "acquire"):
             return
         if mode == "acquire" and (self.depth is None or self.k is None or time.time() - self.depth_t > 0.5):
-            _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people)))
+            _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people), self._lidar_obs(people)))
             return
         if self.depth is None or self.k is None or time.time() - self.depth_t > 0.5:
             if mode in ("follow", "acquire"):
-                _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people)))
+                _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people), self._lidar_obs(people)))
             return
         import numpy as np
         depth = self.depth
@@ -178,18 +210,18 @@ class RgbGuard(Node):
             import gb_obstacle
             raw = gb_obstacle.decode_depth(depth.encoding, bytes(depth.data), depth.height, depth.width, depth.step, getattr(depth, "is_bigendian", 0))
             if raw is None:
-                _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people)))
+                _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people), self._lidar_obs(people)))
                 return
             scale, unit = _health_scale()
             if unit not in ("crosscheck_mm", "crosscheck_m"):
-                _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people)))
+                _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people), self._lidar_obs(people)))
                 return
         else:
-            _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people)))
+            _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people), self._lidar_obs(people)))
             return
         fx, fy, cx, cy = self.k
         if mode == "follow":
-            boxes = [{"conf": p[1], "box": [p[2], p[3], p[4], p[5]]} for p in people]
+            boxes = gb_metric.people_from_dets(people)
             chosen, ambiguous = gb_metric.choose_person(boxes)
             if ambiguous or chosen is None:
                 body = {"t": frame_t, "person": {"t": frame_t, "ambiguous": True}}
@@ -218,7 +250,8 @@ class RgbGuard(Node):
 
 
 def _people_dicts(people):
-    return [{"conf": p[1], "box": [p[2], p[3], p[4], p[5]]} for p in people]
+    import gb_metric
+    return gb_metric.people_from_dets(people)
 
 
 def _health_scale():
@@ -232,10 +265,8 @@ def _health_scale():
 
 
 def _atomic(path, body):
-    import json, os
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f: json.dump(body, f)
-    os.replace(tmp, path)
+    import gb_metric
+    gb_metric.dump_json(path, body)
 
 def main():
     rclpy.init(); n = RgbGuard()

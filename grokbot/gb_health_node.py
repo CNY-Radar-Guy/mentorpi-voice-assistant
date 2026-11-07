@@ -48,6 +48,10 @@ def record(now, lidar_frac, depth_encoding, depth_samples, lidar_front_m, user_l
         "depth_nonzero_frac": nz if topic else 0.0,
         "depth_scale_m": scale if metric else None,
         "tf_applied": bool(tf_fresh),
+        "lidar_topic": "/scan_raw",
+        "lidar_sub_qos": "best_effort_volatile",
+        "lidar_freshness": "receive_time",
+        "scan_alias_required": False,
         "executable": False,
     }
     if user_lidar is not None:
@@ -80,7 +84,13 @@ def main():
         import gb_obstacle
         vals = [float(r) for r in msg.ranges if r == r and 0.05 < float(r) < 30.0]
         forward = gb_obstacle.lidar_forward_m(msg.ranges, msg.angle_min, msg.angle_increment)
-        state["scan"] = (time.time(), vals, forward)
+        header_delta = None
+        try:
+            stamp = msg.header.stamp
+            header_delta = time.time() - (float(stamp.sec) + float(stamp.nanosec) / 1e9)
+        except Exception:
+            header_delta = None
+        state["scan"] = (time.time(), vals, forward, header_delta)
 
     def on_depth(msg):
         state["depth"] = (time.time(), msg)
@@ -116,6 +126,8 @@ def main():
                 samples = [forward_raw] if forward_raw is not None else []
         body = record(now, lidar_frac, encoding, samples, front, topic_online=topic, nonzero_frac=nonzero,
                       forward_raw=forward_raw, tf_fresh=False)
+        if scan and len(scan) > 3 and scan[3] is not None:
+            body["lidar_header_delta_s"] = round(float(scan[3]), 3)
         write_record(body)
 
     node.create_timer(0.5, tick)

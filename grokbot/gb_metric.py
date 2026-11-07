@@ -5,10 +5,50 @@ valid pixels. A name, including "John", never selects a person. A pointing
 target is the pixel where the wrist-to-index ray leaves the hand, sampled in
 the depth image. Missing landmarks produce no target.
 """
-import math
+import json, math, os
 
 MIN_PIXELS = 20
 PERSON_CONF = 0.75
+
+
+def json_number(value):
+    """Python int or float. A numpy float32 is not accepted by json.dump."""
+    item = getattr(value, "item", None)
+    if callable(item) and not isinstance(value, (str, bytes, dict, list, tuple)):
+        value = item()
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return int(value)
+    return float(value)
+
+
+def people_from_dets(dets):
+    """Model rows (label, conf, x1, y1, x2, y2) as plain numbers. No range is added."""
+    out = []
+    for row in dets or []:
+        try:
+            out.append({
+                "label": row[0],
+                "conf": json_number(row[1]),
+                "box": [json_number(row[i]) for i in (2, 3, 4, 5)],
+            })
+        except (TypeError, ValueError, IndexError):
+            continue
+    return out
+
+
+def dump_json(path, body):
+    """Atomic JSON write. A numpy scalar cannot leave the previous file in place."""
+    def _default(obj):
+        item = getattr(obj, "item", None)
+        if callable(item):
+            return json_number(obj)
+        raise TypeError("not JSON serializable: %s" % type(obj).__name__)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(body, f, default=_default)
+    os.replace(tmp, path)
 
 
 def choose_person(people, point=None):
@@ -156,6 +196,46 @@ def track_record(now, depth_m, bearing, conf, unit, valid_pixels, source, map_xy
     return {"t": float(now), "person": person}
 
 
+def bearing_from_box(box, fx, cx):
+    """Camera-frame yaw of the box centre. None without intrinsics."""
+    import math
+    try:
+        u = (float(box[0]) + float(box[2])) / 2.0
+        focal = float(fx)
+        if focal == 0:
+            return None
+        return math.atan2(u - float(cx), focal)
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def range_for_detection(box, fx, cx, beams, calibration, beam_receive_age, depth_obs=None):
+    """Validated depth, otherwise a calibrated lidar beam at the box bearing.
+
+    A missing calibration returns None. The forward-corridor minimum is not used.
+    beam_receive_age is wall-clock age; a header stamp cannot make a stale scan fresh.
+    """
+    if isinstance(depth_obs, dict) and depth_obs.get("depth_m") is not None and depth_obs.get("unit") in (
+            "crosscheck_mm", "crosscheck_m", "32FC1_metres"):
+        return {"source": "depth", "depth_m": float(depth_obs["depth_m"]), "unit": depth_obs["unit"],
+                "bearing": float(depth_obs.get("bearing") or 0.0), "extrinsics_validated": False}
+    try:
+        age = float(beam_receive_age)
+    except (TypeError, ValueError):
+        return None
+    if age < -0.1 or age > 0.5:
+        return None
+    bearing = bearing_from_box(box, fx, cx)
+    if bearing is None:
+        return None
+    import gb_obstacle
+    rng = gb_obstacle.lidar_person_range(beams, bearing, calibration)
+    if rng is None:
+        return None
+    return {"source": "lidar", "depth_m": float(rng), "unit": "lidar", "bearing": bearing,
+            "extrinsics_validated": True, "clearance_m": float(rng)}
+
+
 def sighting_record(now, people, range_obs=None):
     """Detection without inventing a range.
 
@@ -171,8 +251,12 @@ def sighting_record(now, people, range_obs=None):
         return {"t": now, "detect_ok": True, "person": {"t": now, "ambiguous": True,
                 "conf": max(float(p.get("conf") or 0) for p in people)}}
     one = people[0]
-    person = {"t": now, "conf": float(one.get("conf") or 0), "box": list(one.get("box") or []),
-              "ambiguous": False, "name": None}
+    try:
+        conf = json_number(one.get("conf") or 0)
+        box = [json_number(v) for v in list(one.get("box") or [])]
+    except (TypeError, ValueError):
+        return {"t": now, "detect_ok": True, "person": None, "reason": "detection_not_numeric"}
+    person = {"t": now, "conf": conf, "box": box, "ambiguous": False, "name": None}
     obs = range_obs or {}
     source = obs.get("source")
     if source == "depth" and obs.get("depth_m") is not None and obs.get("unit") in (

@@ -20,14 +20,32 @@ def _ws(timeout=5):
     import websocket
     return websocket.create_connection(ROSBRIDGE, timeout=timeout)
 
-def subscribe_once(topic, typ, timeout=4.0, n=1, throttle_ms=0):
+def sensor_qos():
+    """Best-effort volatile. Compatible with a reliable publisher. Not a latched read."""
+    return {"reliability": "best_effort", "durability": "volatile", "history": "keep_last", "depth": 5}
+
+
+def scan_qos():
+    """The live /scan_raw publisher is reliable and volatile. Transient_local receives nothing."""
+    return {"reliability": "reliable", "durability": "volatile", "history": "keep_last", "depth": 5}
+
+
+def subscribe_once(topic, typ, timeout=4.0, n=1, throttle_ms=0, qos=None):
     out = []
     try:
         ws = _ws(timeout)
     except Exception:
         return out
     try:
-        ws.send(json.dumps({"op": "subscribe", "topic": topic, "type": typ, "throttle_rate": throttle_ms}))
+        body = {"op": "subscribe", "topic": topic, "type": typ, "throttle_rate": throttle_ms}
+        if qos is None:
+            if "LaserScan" in typ or str(topic).endswith("/scan_raw"):
+                qos = scan_qos()
+            elif "Image" in typ or "CameraInfo" in typ:
+                qos = sensor_qos()
+        if qos:
+            body["qos"] = qos
+        ws.send(json.dumps(body))
         t0 = time.time(); ws.settimeout(0.5)
         while time.time() - t0 < timeout and len(out) < n:
             try:

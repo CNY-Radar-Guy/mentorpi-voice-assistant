@@ -88,6 +88,73 @@ def sector_is_clear(valid_count, total, nearest_m, stop_m, min_frac=0.5):
     return d >= float(stop_m)
 
 
+# Observed /scan_raw offer on the robot: one publisher, reliable, volatile.
+# The health node subscribes best-effort volatile, which is compatible with that offer.
+# A transient_local (latched) subscriber is not, and receives nothing while health stays fresh.
+SCAN_PUBLISHER_QOS = {"reliability": "reliable", "durability": "volatile"}
+HEALTH_SCAN_QOS = {"reliability": "best_effort", "durability": "volatile", "history": "keep_last", "depth": 5}
+ONEOFF_SCAN_QOS = {"reliability": "reliable", "durability": "volatile", "history": "keep_last", "depth": 5}
+
+
+def qos_compatible(publisher, subscriber):
+    """ROS durability and reliability. Incompatible QoS is silence, not a dead lidar."""
+    try:
+        pub_r = publisher["reliability"]
+        pub_d = publisher["durability"]
+        sub_r = subscriber["reliability"]
+        sub_d = subscriber["durability"]
+    except (TypeError, KeyError):
+        return False
+    if sub_r == "best_effort":
+        rel_ok = pub_r in ("best_effort", "reliable")
+    elif sub_r == "reliable":
+        rel_ok = pub_r == "reliable"
+    else:
+        rel_ok = False
+    if sub_d == "volatile":
+        dur_ok = pub_d in ("volatile", "transient_local")
+    elif sub_d == "transient_local":
+        dur_ok = pub_d == "transient_local"
+    else:
+        dur_ok = False
+    return rel_ok and dur_ok
+
+
+def sampler_silence(publisher, subscriber, receive_age_s, limit=1.0):
+    """Why a one-off read can be empty while a long-running subscriber is fresh."""
+    if not qos_compatible(publisher, subscriber):
+        return "qos_incompatible"
+    return "scan_raw" if receive_time_fresh(receive_age_s, limit=limit) else "no_receive"
+
+
+def scan_source_ready(topics, receive_age_s, limit=1.0):
+    """/scan_raw with a fresh receive time. Absence of /scan is not a fault.
+
+    Freshness is when this process received the message, not the header stamp.
+    """
+    names = set(topics or [])
+    if "/scan_raw" not in names:
+        return False, "scan_raw_absent"
+    try:
+        age = float(receive_age_s)
+    except (TypeError, ValueError):
+        return False, "scan_raw_stale"
+    if age < -1.0 or age > float(limit):
+        return False, "scan_raw_stale"
+    return True, "scan_raw"
+
+
+def receive_time_fresh(receive_age, header_age=None, limit=1.0):
+    """A header in another clock domain cannot extend a stale receive time."""
+    try:
+        age = float(receive_age)
+    except (TypeError, ValueError):
+        return False
+    if age < -1.0 or age > float(limit):
+        return False
+    return True
+
+
 def lidar_status(ranges, frame_id=None):
     """Classify one /scan_raw. A missing device is the caller's problem; this does not open a serial port.
 

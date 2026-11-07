@@ -60,6 +60,14 @@ def demand_path():
     return os.path.join(shared_dir(), "demand.json")
 
 
+def extrinsics_path():
+    """Read-only camera-to-lidar calibration. This tree never writes it."""
+    explicit = os.environ.get("GB_EXTRINSICS_FILE")
+    if explicit:
+        return os.path.expanduser(explicit)
+    return os.path.join(shared_dir(), "lidar_extrinsics.json")
+
+
 def person_track_path():
     explicit = os.environ.get("PERSON_TRACK_FILE")
     if explicit:
