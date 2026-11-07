@@ -95,6 +95,65 @@ def set_autonomy(on):
     _autonomy = bool(on)
 
 
+def autonomy_phrase(text):
+    """Explicit on or off. Follow requests do not turn it on."""
+    t = re.sub(r"\s+", " ", (text or "").lower()).strip(" .!?")
+    if re.search(r"\b(disable autonomy|autonomy off|turn autonomy off|switch autonomy off)\b", t):
+        return "off"
+    if re.search(r"\b(enable autonomy|autonomy on|turn autonomy on|switch autonomy on)\b", t):
+        return "on"
+    return None
+
+
+def controller_heartbeat(path=None, now=None, max_age=2.0):
+    """True when the watchdog state file is fresh. That is not wheel motion."""
+    path = path or os.environ.get("WD_STATE_HOST") or "/home/pi/docker/tmp/gb_safety/watchdog_state.json"
+    now = time.time() if now is None else float(now)
+    try:
+        with open(path) as f:
+            body = json.load(f)
+        age = now - float(body["t"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return 0 <= age <= float(max_age)
+
+
+def autonomy_blockers(health_snap, track, controller_ok, now=None):
+    """Reasons autonomy must stay off. A person name is not one of the checks."""
+    missing = []
+    if not gb_health.autonomy_allowed(health_snap, now):
+        missing.append("a fresh range check")
+    if not isinstance(track, dict) or not track.get("fresh"):
+        missing.append("a fresh measured person")
+    else:
+        if track.get("ambiguous"):
+            missing.append("one person, not several")
+        try:
+            conf = float(track.get("conf"))
+        except (TypeError, ValueError):
+            conf = None
+        if conf is None or conf < gb_follow.CONF_MIN:
+            missing.append("a person track at %.2f confidence" % gb_follow.CONF_MIN)
+        if track.get("source") not in ("lidar", "depth") or track.get("depth_m") is None:
+            missing.append("a measured range to that person")
+    if not controller_ok:
+        missing.append("a fresh watchdog heartbeat")
+    return missing
+
+
+def _follow_demand(active):
+    try:
+        import gb_demand
+        path = os.environ.get("GB_DEMAND_FILE", "/home/pi/docker/tmp/gb_safety/demand.json")
+        current = gb_demand.read_demand(path)
+        if active:
+            gb_demand.write_demand(path, "follow")
+        elif current == "follow":
+            gb_demand.write_demand(path, "idle")
+    except Exception:
+        return
+
+
 def vision_may_move(_text=None):
     """Image descriptions, including Grok's, are not permission to move."""
     return False
@@ -186,6 +245,7 @@ def tick_runtime(now=None):
             _publish(cmd)
         else:
             _publish({"op": "stop", "allow": False, "reason": cmd.get("reason")})
+        _follow_demand(bool(fl.active))
     m = mission()
     if m.phase != "idle":
         if maint or protections.get("estop"):
@@ -224,7 +284,15 @@ def read_person_track(path, now=None):
         return None
     if age < 0 or age > 0.5 or dist != dist or dist <= 0:
         return None
-    if p.get("unit") not in gb_health.VALIDATED_DEPTH_UNITS and p.get("source") != "lidar":
+    if p.get("source") == "lidar":
+        if "clearance_m" in p:
+            try:
+                clearance = float(p.get("clearance_m"))
+            except (TypeError, ValueError):
+                return None
+            if clearance != clearance or clearance < 0.4:
+                return None
+    elif p.get("unit") not in gb_health.VALIDATED_DEPTH_UNITS:
         return None
     source = "lidar" if p.get("source") == "lidar" else "depth"
     try:
@@ -233,7 +301,8 @@ def read_person_track(path, now=None):
         conf = None
     return {"depth_m": dist, "source": source, "fresh": True, "bearing": float(p.get("bearing") or 0.0),
             "conf": conf, "ambiguous": bool(p.get("ambiguous")), "unit": p.get("unit"),
-            "depth_age": age if source == "depth" else 0.0}
+            "depth_age": age if source == "depth" else 0.0,
+            "name_ignored": str(p.get("name") or "").lower() == "john"}
 
 
 def follow_once(health_snap, track, autonomy, protections=None):
@@ -298,8 +367,22 @@ def handle(text, protections=None):
     if woken and woken[0]:
         t = re.sub(r"\s+", " ", (woken[1] or "").lower()).strip(" .!?") or t
     t = re.sub(r"^(grok bot|grok|robot)[, ]+", "", t).strip()
-    if fresh_john(raw):
+    if fresh_john(raw) and not re.search(r"\b(follow|come|drive|toward)\b", t):
         return NO_AUTH
+    asked = autonomy_phrase(raw)
+    if asked == "off":
+        set_autonomy(False)
+        follow_loop().cancel("autonomy_off")
+        _follow_demand(False)
+        drop_goals("autonomy-off")
+        return "Autonomy is off. I dropped the trip and I am not moving."
+    if asked == "on":
+        track = read_person_track(os.environ.get("PERSON_TRACK_FILE", ""))
+        missing = autonomy_blockers(gb_health.read_shared(), track, controller_heartbeat(), time.time())
+        if missing:
+            return "Autonomy stays off. I still need " + ", ".join(missing) + ". I am not moving."
+        set_autonomy(True)
+        return "Autonomy is on for a new follow only. I am not starting the last trip, and I have not moved."
     if re.search(r"\b(reboot|restart yourself|power off the pi|shut ?down the pi)\b", t):
         return "I don't reboot or shut down from a message. That stays on the Pi, with you there."
     if "what is your load budget" in t or "cpu budget" in t:
@@ -307,7 +390,7 @@ def handle(text, protections=None):
     taught = teacher().hear(t, _default_capture)
     if taught:
         return taught
-    if re.search(r"\b(follow me|follow john|stay with me)\b", t):
+    if re.search(r"\b(follow me|stay with me|drive toward me|come to me|come here)\b", t):
         try:
             import gb_maint
             if gb_maint.is_set():
@@ -328,25 +411,25 @@ def handle(text, protections=None):
                 track = dict(track, conf=track.get("conf"))
         else:
             track = read_person_track(os.environ.get("PERSON_TRACK_FILE", ""))
-        try:
-            import gb_demand
-            gb_demand.write_demand(os.environ.get("GB_DEMAND_FILE", "/home/pi/docker/tmp/gb_safety/demand.json"), "follow")
-        except Exception:
-            pass
         fl = follow_loop()
         now = time.time()
+        if not _autonomy:
+            _follow_demand(False)
+            return "Autonomy is off. I will not follow, and I did not send a drive."
         fl.start(now)
         cmd = fl.step(now, gb_health.read_shared(now=now), track, _autonomy, protections, maint=False)
-        mission().commands.append({"lin": cmd.get("lin") or 0.0, "ang": cmd.get("ang") or 0.0, "why": "follow"})
+        _follow_demand(bool(fl.active))
         if cmd.get("allow") and (cmd.get("lin") or cmd.get("ang")):
+            mission().commands.append({"lin": cmd.get("lin") or 0.0, "ang": cmd.get("ang") or 0.0, "why": "follow"})
             _publish(cmd)
         elif cmd.get("op") == "stop" and cmd.get("reason") not in ("person_lost", "person_gap", "autonomy_off", "confidence"):
             _publish({"op": "stop", "allow": False, "reason": cmd.get("reason")})
         if cmd.get("speech"):
             return cmd["speech"]
         if cmd.get("lin") or cmd.get("ang"):
-            return "I'll keep about 2 metres back."
-        return "I'm holding about 2 metres."
+            who = " The name on the track is not proof that the person is John." if (track or {}).get("name_ignored") else ""
+            return "I sent the gate a follow hold to stay about 2 metres from the person I can measure." + who + " I have not seen the wheels move."
+        return "I am inside the follow band, so I did not send a drive."
     m = re.search(r"\b(?:go to|drive to|head to) (?:the |that )?([a-z0-9 ]+?)(?: and wait (\d+) seconds?)?$", t)
     if m and not re.search(r"\b(sleep|bed|left|right|forward|back)\b", m.group(1)):
         dwell = float(m.group(2) or 5)

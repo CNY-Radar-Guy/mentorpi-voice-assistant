@@ -98,9 +98,15 @@ class WD(Node):
         self.gate_t = time.time()
         if self.gate.get("mode") not in (None, "idle"): self.gate_moving_t = self.gate_t
 
-    def _ack_maint(self):
+    def _write_state(self, why, zeroing):
+        """Record the lock that exists now. A removed hold must not stay true in the file."""
         path = E("WD_STATE", "/home/ubuntu/shared/gb_safety/watchdog_state.json")
-        body = {"t": time.time(), "maint": True, "zeroing": True, "release": E("GB_RELEASE", ""), "why": "maintenance"}
+        try:
+            import gb_health
+            body = gb_health.watchdog_report(os.path.exists(MAINT), zeroing, E("GB_RELEASE", ""), time.time(), why)
+        except Exception:
+            body = {"t": time.time(), "maint": os.path.exists(MAINT), "zeroing": bool(zeroing),
+                    "release": E("GB_RELEASE", ""), "why": why}
         try:
             tmp = path + ".tmp"
             with open(tmp, "w") as f:
@@ -156,14 +162,16 @@ class WD(Node):
         now = time.time()
         if os.path.exists(MAINT):
             self.zero("maintenance")
-            self._ack_maint()
+            self._write_state("maintenance", True)
             return
         e = os.path.exists(ESTOP)
         if e != self.estop:
             self.log("ESTOP %s" % ("LATCHED -> zero at 10 Hz" if e else "cleared"))
             self.estop = e
         if e:
-            self.zero("estop"); return
+            self.zero("estop")
+            self._write_state("estop", True)
+            return
         # stale non-zero command on any controller input (ignore our own zeros)
         for t, (nz, tl, lin, ang) in list(self.cur.items()):
             if nz and now - tl > STALE:
@@ -177,13 +185,16 @@ class WD(Node):
         if self.motor_nz and now - self.last_nz_cmd > STALE and now - self.motor_t < 5.0:
             self.start_burst("motors non-zero with no non-zero cmd_vel for %.1fs" % (now - self.last_nz_cmd)); self.motor_nz = False
         if now < self.burst_until:
-            self.zero(self.burst_why); return
+            self.zero(self.burst_why)
+            self._write_state(self.burst_why, True)
+            return
         # idle keep-alive zero straight to the motor topic
         any_nz = any(v[0] for v in self.cur.values()) or (now - self.last_nz_cmd < STALE)
         if not any_nz and now - self.last_idle_zero >= IDLE_ZERO:
             if self.zm:
                 ms = MotorsState(); ms.data = [MotorState(id=i, rps=0.0) for i in (1, 2, 3, 4)]; self.zm.publish(ms)
             self.last_idle_zero = now
+        self._write_state("idle", False)
 
 def main():
     rclpy.init()

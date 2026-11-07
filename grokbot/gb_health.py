@@ -33,8 +33,18 @@ BAD_N = int(os.environ.get("HEALTH_BAD_N", "2"))
 # Pi 5 is 4 cores. A healthy idle near 2.2 must not shed. Optional vision
 # stands down only above this 1-minute load. Safety loops ignore it.
 LOAD_SHED = float(os.environ.get("WALLY_LOAD_SHED", "3.5"))
-SHARED = os.path.expanduser(os.environ.get(
-    "HEALTH_FILE", "~/docker/tmp/gb_safety/health.json"))
+def _default_health_path():
+    explicit = os.environ.get("HEALTH_FILE") or os.environ.get("GB_HEALTH_FILE")
+    if explicit:
+        return os.path.expanduser(explicit)
+    try:
+        import gb_paths
+        return os.path.join(os.path.dirname(gb_paths.shared_estop()), "health.json")
+    except Exception:
+        return os.path.expanduser("~/docker/tmp/gb_safety/health.json")
+
+
+SHARED = _default_health_path()
 
 
 def depth_valid_fraction(samples, scale_m, min_m=0.15, max_m=6.0):
@@ -337,9 +347,43 @@ class Health(object):
         return None
 
 
+def sample_time(body):
+    """Epoch seconds from t, time, or a ROS stamp. Milliseconds only above 1e12."""
+    if not isinstance(body, dict):
+        return None
+    raw = body.get("t", body.get("time"))
+    if raw is None and isinstance(body.get("stamp"), dict):
+        try:
+            raw = float(body["stamp"].get("sec") or 0) + float(body["stamp"].get("nanosec") or 0) / 1e9
+        except (TypeError, ValueError):
+            return None
+    elif raw is None:
+        raw = body.get("stamp")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value > 1e14:
+        value = value / 1e9
+    elif value > 1e12:
+        value = value / 1000.0
+    if value < 1e9:
+        return None
+    return value
+
+
 def read_shared(path=None, now=None):
-    """Fresh health snapshot, or None if the monitor is missing, stale, or malformed."""
-    p = path or SHARED
+    """Fresh health snapshot, or None if the monitor is missing, stale, or malformed.
+
+    The file may be written by a process that is not the enabled unit. A missing
+    or old timestamp is still a refusal. Three seconds remains the limit.
+    """
+    if path:
+        p = path
+    elif os.environ.get("HEALTH_FILE") or os.environ.get("GB_HEALTH_FILE"):
+        p = _default_health_path()
+    else:
+        p = SHARED
     now = time.time() if now is None else float(now)
     try:
         with open(p) as f:
@@ -348,13 +392,28 @@ def read_shared(path=None, now=None):
         return None
     if not isinstance(d, dict):
         return None
-    try:
-        age = now - float(d["t"])
-    except (KeyError, TypeError, ValueError):
+    stamped = sample_time(d)
+    if stamped is None:
         return None
+    age = now - stamped
     if age < -1.0 or age > 3.0:
         return None
+    d = dict(d)
+    d["t"] = stamped
+    if d.get("depth_topic_online") and d.get("depth_metric_valid") is not True:
+        d["depth_online"] = False
     return d
+
+
+def watchdog_report(maint_present, zeroing, release, now, why):
+    """Current watchdog state. Maintenance is true only while the lock file exists."""
+    return {
+        "t": float(now),
+        "maint": bool(maint_present),
+        "zeroing": bool(zeroing),
+        "release": release or "",
+        "why": why or "",
+    }
 
 
 def autonomy_allowed(snap, now=None):

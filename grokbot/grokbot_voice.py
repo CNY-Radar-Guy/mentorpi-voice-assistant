@@ -845,7 +845,7 @@ def do_timed(p):
     if blk: return blk
     desc = gb_estop.describe(p)
     if gb_features.is_dry():
-        log(f"[timed] DRY {p}"); return f"Dry run: I would {desc}."
+        log(f"[timed] DRY {p}"); return f"Dry run: I would {desc}. No command was sent."
     try:
         rid = gb_estop.gate_request(dict(p, src="voice"))
         log(f"[timed] request id={rid} {p}")
@@ -858,7 +858,7 @@ def do_timed(p):
         try: gb_estop.zero_now("timed request failed")
         finally: pass
         return f"I couldn't reach my motion gate, so I'm not moving ({str(ex)[:60]})."
-    return f"Okay, I'll {desc}."
+    return f"I sent the gate a request to {desc}. I have not seen the wheels move."
 
 def estop_intent(text):
     """Runs FIRST for every voice and chat command. Returns a reply or None."""
@@ -944,8 +944,8 @@ def feature_intent(t, text):
         return gb_features.start_feature("gesture")[1], "local"
     if re.search(r"\bobstacle avoid|\bavoid(ing)? obstacles\b", t):
         return gb_features.start_feature("lidar", mode="avoid")[1], "local"
-    if re.search(r"\blidar follow|\bfollow me\b", t):
-        return gb_features.start_feature("lidar", mode="follow")[1], "local"
+    if re.search(r"\blidar follow|\bfollow me\b|\bdrive toward me\b|\bcome to me\b", t):
+        return None
     if re.search(r"\b(guard mode|lidar guard|guarding|stand guard)\b", t):
         return gb_features.start_feature("lidar", mode="guard")[1], "local"
     m = re.search(r"\b(?:navigate|go|drive|head|take me|take yourself|get yourself|make your way)(?: over| back| on)? to (?:the |my |our )?(.+)$", t)
