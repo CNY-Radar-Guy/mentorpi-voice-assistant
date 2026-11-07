@@ -18,6 +18,8 @@ the backup back: the original set_motor_state accepts every nonzero command.
 import hashlib
 import os
 import shutil
+import subprocess
+import sys
 
 ORIGINAL_SHA256 = "455e6362c71a2d8ba7dacf7db3a81d42183f371b7a04b6364d360fc37fb339d9"
 VENDOR_NAME = "ros_robot_controller_node.py"
@@ -39,6 +41,16 @@ CONSOLE_REL = "install/ros_robot_controller/lib/ros_robot_controller/ros_robot_c
 CONTAINER_SRC = WS_DEFAULT + "/" + SRC_REL
 CONTAINER_INSTALL = WS_DEFAULT + "/" + SITE_REL
 CANDIDATES = (CONTAINER_SRC,)
+HOOK_DIR_DEFAULT = "/home/ubuntu/shared/gb_safety/gb_hook"
+# Import closure of the controller hook, plus gb_estop which gb_intent imports
+# when a lease is opened. Nothing else is loaded on the next start.
+HOOK_FILES = (
+    "gb_actuation.py",
+    "gb_intent.py",
+    "gb_motor_cap.py",
+    "gb_estop.py",
+    "gb_paths.py",
+)
 MISSING_FROM_ARCHIVE = (
     "/home/ubuntu/software/chassis_adjustment/robot_correction_factors.yaml",
     "ros_robot_controller/setup.py",
@@ -329,3 +341,159 @@ def rollback_file(path, backup_path=None):
                 "reason": "refusing to restore the original set_motor_state; this file is not the patched callback"}
     return {"ok": True, "restored": False, "nonzero_denied": True, "restart": False, "clear_maint": False,
             "reason": "backup kept for audit; original set_motor_state is not restored"}
+
+
+def hook_blobs(package_root):
+    """Bytes of the packaged hook modules. A missing file is a hard failure."""
+    blobs = {}
+    missing = []
+    root = os.path.join(package_root, "grokbot")
+    for name in HOOK_FILES:
+        path = os.path.join(root, name)
+        try:
+            with open(path, "rb") as handle:
+                blobs[name] = handle.read()
+        except OSError:
+            missing.append(name)
+    return blobs, missing
+
+
+def verify_hook_imports(hook_dir):
+    """Import the hook the way the next controller start will. No node and no board."""
+    code = (
+        "import sys\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "import gb_actuation, gb_intent, gb_motor_cap, gb_paths, gb_estop\n"
+        "gb_intent.read_lease()\n"
+        "gb_intent.read_envelope(0.0)\n"
+        "gb_motor_cap.load_track_correction('/no/such/robot_correction_factors.yaml')\n"
+        "gb_motor_cap.correct_tank_twist(0.0, 0.0, 1.0, 1.0)\n"
+        "hook = gb_actuation.ControllerHook()\n"
+        "speeds, _decision = gb_actuation.board_command("
+        "[(1, 0.0), (2, 0.0), (3, 0.0), (4, 0.0)], None, 0.0, None, False, None, hook)\n"
+        "assert speeds is not None\n"
+        "for banned in ('rclpy', 'ros_robot_controller', 'ros_robot_controller.ros_robot_controller_sdk'):\n"
+        "    assert banned not in sys.modules, banned\n"
+        "print('import_ok')\n"
+    )
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin"),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "GB_LEASE_FILE": os.path.join(hook_dir, "no-lease.json"),
+        "GB_GATE_ENVELOPE": os.path.join(hook_dir, "no-envelope.json"),
+        "GB_MAINT_FILE": os.path.join(hook_dir, "no-MAINT"),
+        "GB_SHARED_DIR": hook_dir,
+        "GB_DATA": hook_dir,
+        "GB_SHARED_ESTOP": os.path.join(hook_dir, "no-ESTOP"),
+        "GB_DIR": hook_dir,
+    }
+    proc = subprocess.run([sys.executable, "-c", code, hook_dir], env=env, capture_output=True, text=True)
+    ok = proc.returncode == 0 and "import_ok" in proc.stdout
+    detail = (proc.stderr or proc.stdout or "")[-500:]
+    return ok, detail
+
+
+def _hook_matches(dest, blobs):
+    for name, data in blobs.items():
+        path = os.path.join(dest, name)
+        if os.path.islink(path) or not os.path.isfile(path):
+            return False
+        with open(path, "rb") as handle:
+            if handle.read() != data:
+                return False
+    return True
+
+
+def _stage_hook(dest, blobs):
+    """Write the packaged modules. A symlink at the destination is not replaced."""
+    if _hook_matches(dest, blobs):
+        return {"ok": True, "changed": False, "reason": "hook_unchanged"}
+    for name in blobs:
+        path = os.path.join(dest, name)
+        if os.path.lexists(path) and os.path.islink(path):
+            return {"ok": False, "changed": False, "reason": "refusing_to_replace_hook_symlink", "path": path}
+    parent = os.path.dirname(dest.rstrip(os.sep)) or "."
+    os.makedirs(parent, exist_ok=True)
+    staging = dest + ".gb-staging"
+    if os.path.isdir(staging):
+        shutil.rmtree(staging)
+    os.makedirs(staging)
+    try:
+        for name, data in blobs.items():
+            with open(os.path.join(staging, name), "wb") as handle:
+                handle.write(data)
+        os.makedirs(dest, exist_ok=True)
+        for name in blobs:
+            os.replace(os.path.join(staging, name), os.path.join(dest, name))
+    finally:
+        if os.path.isdir(staging):
+            shutil.rmtree(staging, ignore_errors=True)
+    if not _hook_matches(dest, blobs):
+        return {"ok": False, "changed": True, "reason": "hook_write_failed"}
+    return {"ok": True, "changed": True, "reason": "hook_staged"}
+
+
+def install_controller(ws, hook_dest, package_root, apply=False, backup_dir=None):
+    """Stage the hook, prove it imports, and only then patch the controller source.
+
+    A missing hook directory is created by this function when apply is true.
+    An unknown controller hash or a failed import writes neither the hook nor
+    the controller. Nothing here restarts a process or clears MAINT.
+    """
+    pre = install_layout(ws, apply=False, backup_dir=backup_dir)
+    result = {
+        "ok": False, "changed": False, "restart": False, "clear_maint": False,
+        "writes": [], "absent": pre.get("absent") or [], "files": pre.get("files") or [],
+        "hook": [], "hook_dest": hook_dest, "backup": None, "reason": pre.get("reason"),
+    }
+    if not pre.get("ok"):
+        return result
+    blobs, missing = hook_blobs(package_root)
+    if missing:
+        result["reason"] = "hook_missing"
+        result["missing"] = missing
+        return result
+    probe = hook_dest + ".gb-import-probe"
+    if os.path.isdir(probe):
+        shutil.rmtree(probe)
+    os.makedirs(probe)
+    try:
+        for name, data in blobs.items():
+            with open(os.path.join(probe, name), "wb") as handle:
+                handle.write(data)
+        ok, detail = verify_hook_imports(probe)
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+    if not ok:
+        result["reason"] = "hook_import_failed"
+        result["detail"] = detail
+        return result
+    result["hook"] = list(HOOK_FILES)
+    if not apply:
+        result.update(ok=True, reason="ready", changed=False)
+        return result
+    staged = _stage_hook(hook_dest, blobs)
+    if not staged.get("ok"):
+        result["reason"] = staged.get("reason")
+        return result
+    ok, detail = verify_hook_imports(hook_dest)
+    if not ok:
+        result["reason"] = "hook_import_failed"
+        result["detail"] = detail
+        result["changed"] = bool(staged.get("changed"))
+        return result
+    applied = install_layout(ws, apply=True, backup_dir=backup_dir)
+    result["files"] = applied.get("files") or result["files"]
+    result["writes"] = applied.get("writes") or []
+    result["backup"] = applied.get("backup")
+    result["absent"] = applied.get("absent") or result["absent"]
+    if not applied.get("ok"):
+        result["reason"] = applied.get("reason") or "write_failed"
+        result["changed"] = bool(staged.get("changed"))
+        return result
+    result["ok"] = True
+    result["changed"] = bool(staged.get("changed") or applied.get("changed"))
+    result["controller"] = applied.get("reason")
+    result["hook_reason"] = staged.get("reason")
+    result["reason"] = "already_complete" if not result["changed"] else "installed"
+    return result

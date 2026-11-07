@@ -89,6 +89,7 @@ env = dict(os.environ)
 env["GB_CONTROLLER_PATCH_APPLY"] = "1"
 env["GB_ROS_WS"] = ws
 env["GB_PATCH_BACKUP"] = bak
+env["GB_HOOK_DIR"] = os.path.join(os.environ["GB_SHARED_DIR"], "gb_hook")
 proc = subprocess.run(["sh", os.path.join(ROOT, "deploy", "controller_patch_install.sh")],
                       cwd="/tmp", env=env, capture_output=True, text=True)
 check("the installer apply on an already patched tree does not restart",
