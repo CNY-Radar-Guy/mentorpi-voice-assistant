@@ -27,7 +27,7 @@ DEPTH_FRESH_S = float(os.environ.get("HEALTH_DEPTH_FRESH_S", "1.0"))
 # A healthy /scan_raw is about 400 beams with ~384-394 finite. Half-empty is not "online".
 MIN_VALID_FRAC = float(os.environ.get("HEALTH_MIN_VALID_FRAC", "0.50"))
 # Autonomous depth is off until a real unit check. A driver scale string alone is not enough.
-VALIDATED_DEPTH_UNITS = {"crosscheck_mm", "crosscheck_m", "32FC1_metres"}
+VALIDATED_DEPTH_UNITS = {"crosscheck_mm", "crosscheck_m", "32FC1_metres", "documented_mm"}
 GOOD_N = int(os.environ.get("HEALTH_GOOD_N", "2"))
 BAD_N = int(os.environ.get("HEALTH_BAD_N", "2"))
 # Pi 5 is 4 cores. A healthy idle near 2.2 must not shed. Optional vision

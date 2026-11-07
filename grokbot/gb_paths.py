@@ -68,6 +68,14 @@ def extrinsics_path():
     return os.path.join(shared_dir(), "lidar_extrinsics.json")
 
 
+def depth_scale_record_path():
+    """Logged millimetre proof. Absent until the runtime writes the real samples."""
+    explicit = os.environ.get("GB_DEPTH_SCALE_FILE")
+    if explicit:
+        return os.path.expanduser(explicit)
+    return os.path.join(shared_dir(), "depth_scale_record.json")
+
+
 def person_track_path():
     explicit = os.environ.get("PERSON_TRACK_FILE")
     if explicit:

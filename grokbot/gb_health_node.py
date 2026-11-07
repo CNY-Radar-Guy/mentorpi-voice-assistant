@@ -13,13 +13,22 @@ OUT = os.environ.get("GB_HEALTH_FILE", "/home/ubuntu/shared/gb_safety/health.jso
 def record(now, lidar_frac, depth_encoding, depth_samples, lidar_front_m, user_lidar=None, user_camera=None,
            topic_online=None, nonzero_frac=None, forward_raw=None, tf_fresh=False, camera_ahead_m=None):
     import gb_health
+    documented = None
     try:
-        import gb_obstacle
-        scale, how = gb_obstacle.resolve_depth_scale(
-            depth_encoding, None if forward_raw is not None else depth_samples, lidar_front_m,
-            forward_raw=forward_raw, camera_ahead_m=camera_ahead_m, tf_fresh=tf_fresh)
+        import gb_metric
+        documented = gb_metric.validated_depth_scale(depth_encoding)
     except Exception:
-        scale, how = None, "unavailable"
+        documented = None
+    if documented:
+        scale, how = documented
+    else:
+        try:
+            import gb_obstacle
+            scale, how = gb_obstacle.resolve_depth_scale(
+                depth_encoding, None if forward_raw is not None else depth_samples, lidar_front_m,
+                forward_raw=forward_raw, camera_ahead_m=camera_ahead_m, tf_fresh=tf_fresh)
+        except Exception:
+            scale, how = None, "unavailable"
     frac = gb_health.depth_valid_fraction(depth_samples if forward_raw is None else [forward_raw], scale) if scale else 0.0
     lidar_ok = lidar_frac is not None and float(lidar_frac) >= gb_health.MIN_VALID_FRAC
     metric = how in gb_health.VALIDATED_DEPTH_UNITS and frac >= gb_health.MIN_VALID_FRAC

@@ -110,10 +110,12 @@ class RgbGuard(Node):
         self.scan = (time.time(), beams)
 
     def on_img(self, m):
-        self.img = m; self.img_t = time.time()                # keep only the newest frame; inference runs elsewhere
+        import gb_metric
+        self.img = gb_metric.keep_latest(self.img, m); self.img_t = time.time()  # one slot; age uses the header stamp
 
     def on_depth(self, m):
-        self.depth = m; self.depth_t = time.time()
+        import gb_metric
+        self.depth = gb_metric.keep_latest(self.depth, m); self.depth_t = time.time()
 
     def on_info(self, m):
         self.k = (float(m.k[0]), float(m.k[4]), float(m.k[2]), float(m.k[5]))
@@ -144,24 +146,34 @@ class RgbGuard(Node):
             try:
                 img = np.frombuffer(bytes(m.data), dtype=np.uint8).reshape(m.height, m.width, 3)
                 if m.encoding == "rgb8": img = img[:, :, ::-1]
-                frame_t = self.img_t
+                receive_t = self.img_t
+                depth_msg = self.depth
+                depth_receive = self.depth_t
                 t0 = time.time(); dets = self.detect(img); ms = (time.time() - t0) * 1000
                 self._last_infer = max(0.05, ms / 1000.0)
+                import gb_metric
+                cap, cap_why = gb_metric.capture_time(_header_stamp(m), receive_t)
+                depth_cap = None
+                if depth_msg is not None:
+                    depth_cap, _depth_why = gb_metric.capture_time(_header_stamp(depth_msg), depth_receive)
+                write_t = time.time()
                 hz = hazard_from(dets, m.width, m.height)
                 people = [dt for dt in dets if dt[0] == "person"]
-                d = {"t": frame_t, "hazard": bool(hz), "ms": round(ms), "infer_s": round(self._last_infer, 3),
+                d = {"hazard": bool(hz), "ms": round(ms), "infer_s": round(self._last_infer, 3),
                      "n": len(dets), "detect_ok": True, "wh": [m.width, m.height], "person": None}
                 if hz: d.update(hz)
                 if people:
                     lab, cf, x1, y1, x2, y2 = max(people, key=lambda r: r[1])
-                    d["person"] = {"t": frame_t, "conf": round(float(cf), 2),
+                    d["person"] = {"conf": round(float(cf), 2),
                                    "box": [round(float(x1), 1), round(float(y1), 1), round(float(x2), 1), round(float(y2), 1)],
                                    "wh": [m.width, m.height]}
+                d = gb_metric.stamp_observation(d, cap, receive_t, write_t, self._last_infer)
+                if cap is None:
+                    d["capture_reason"] = cap_why
                 try:
-                    self._write_metric(people, m, frame_t)
+                    self._write_metric(people, m, cap, cap_why, depth_msg, depth_cap, receive_t, write_t)
                 except Exception as ex:
                     self.get_logger().warn("person track write failed: %s" % ex)
-                import gb_metric
                 gb_metric.dump_json(OUT, d)
             except Exception as ex:
                 self.get_logger().warn("rgb guard frame failed: %s" % ex); time.sleep(1.0)
@@ -185,8 +197,12 @@ class RgbGuard(Node):
         except Exception:
             return None
 
-    def _write_metric(self, people, image, frame_t):
-        """Demand-driven range. Same YOLO pass. No second model and no invented distance."""
+    def _publish_track(self, body, cap, receive_t, write_t):
+        import gb_metric
+        _atomic(TRACK, gb_metric.stamp_observation(body, cap, receive_t, write_t, self._last_infer))
+
+    def _write_metric(self, people, image, cap, cap_why, depth_msg, depth_cap, receive_t, write_t):
+        """Demand-driven range. Age is the capture stamp. No invented distance."""
         try:
             import gb_metric, gb_hands
         except Exception:
@@ -194,59 +210,71 @@ class RgbGuard(Node):
         mode = self.demand()
         if mode not in ("follow", "point", "acquire"):
             return
-        if mode == "acquire" and (self.depth is None or self.k is None or time.time() - self.depth_t > 0.5):
-            _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people), self._lidar_obs(people)))
+        if cap is None:
+            body = gb_metric.sighting_record(receive_t, _people_dicts(people), {"scale_reason": cap_why})
+            self._publish_track(body, None, receive_t, write_t)
             return
-        if self.depth is None or self.k is None or time.time() - self.depth_t > 0.5:
-            if mode in ("follow", "acquire"):
-                _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people), self._lidar_obs(people)))
+        obs = self._lidar_obs(people) or {}
+        paired = depth_msg is not None and self.k is not None and gb_metric.frames_paired(cap, depth_cap)
+        fresh = gb_metric.fresh_capture(cap, write_t) and gb_metric.fresh_capture(depth_cap, write_t)
+        if not paired or not fresh:
+            why = "capture_not_fresh" if paired else "frames_not_paired"
+            obs = dict(obs); obs["scale_reason"] = why
+            self._publish_track(gb_metric.sighting_record(cap, _people_dicts(people), obs), cap, receive_t, write_t)
             return
         import numpy as np
-        depth = self.depth
-        if depth.encoding == "32FC1":
-            raw = np.frombuffer(bytes(depth.data), dtype="<f4").reshape(depth.height, depth.width)
+        if depth_msg.encoding == "32FC1":
+            raw = np.frombuffer(bytes(depth_msg.data), dtype="<f4").reshape(depth_msg.height, depth_msg.width)
             scale, unit = 1.0, "32FC1_metres"
-        elif depth.encoding in ("16UC1", "mono16"):
+        elif depth_msg.encoding in ("16UC1", "mono16"):
+            documented = gb_metric.validated_depth_scale(depth_msg.encoding)
+            if not documented:
+                obs = dict(obs); obs["scale_reason"] = "no_scale_record"
+                self._publish_track(gb_metric.sighting_record(cap, _people_dicts(people), obs), cap, receive_t, write_t)
+                return
             import gb_obstacle
-            raw = gb_obstacle.decode_depth(depth.encoding, bytes(depth.data), depth.height, depth.width, depth.step, getattr(depth, "is_bigendian", 0))
+            raw = gb_obstacle.decode_depth(depth_msg.encoding, bytes(depth_msg.data), depth_msg.height, depth_msg.width, depth_msg.step, getattr(depth_msg, "is_bigendian", 0))
             if raw is None:
-                _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people), self._lidar_obs(people)))
+                self._publish_track(gb_metric.sighting_record(cap, _people_dicts(people), obs), cap, receive_t, write_t)
                 return
-            scale, unit = _health_scale()
-            if unit not in ("crosscheck_mm", "crosscheck_m"):
-                _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people), self._lidar_obs(people)))
-                return
+            scale, unit = documented
         else:
-            _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people), self._lidar_obs(people)))
+            self._publish_track(gb_metric.sighting_record(cap, _people_dicts(people), obs), cap, receive_t, write_t)
             return
         fx, fy, cx, cy = self.k
-        if mode == "follow":
+        if mode in ("follow", "acquire"):
             boxes = gb_metric.people_from_dets(people)
             chosen, ambiguous = gb_metric.choose_person(boxes)
+            if not people:
+                self._publish_track(gb_metric.sighting_record(cap, [], obs), cap, receive_t, write_t)
+                return
             if ambiguous or chosen is None:
-                body = {"t": frame_t, "person": {"t": frame_t, "ambiguous": True}}
+                body = {"t": cap, "person": {"t": cap, "ambiguous": True, "time_base": "capture"}}
             else:
                 got = gb_metric.box_range(raw, chosen["box"], scale, fx, fy, cx, cy)
                 if not got:
+                    obs = dict(obs); obs["scale_reason"] = "no_depth_pixels"
+                    self._publish_track(gb_metric.sighting_record(cap, _people_dicts(people), obs), cap, receive_t, write_t)
                     return
-                body = gb_metric.track_record(frame_t, got["depth_m"], got["bearing"], chosen["conf"], unit, got["valid_pixels"], "depth")
-            _atomic(TRACK, body)
+                body = gb_metric.track_record(cap, got["depth_m"], got["bearing"], chosen["conf"], unit, got["valid_pixels"], "depth")
+                body["person"]["depth_capture_t"] = depth_cap
+            self._publish_track(body, cap, receive_t, write_t)
         elif mode == "point":
             pts, why = gb_hands.landmarks(np.ascontiguousarray(np.frombuffer(bytes(image.data), dtype=np.uint8).reshape(image.height, image.width, 3)))
             if not pts:
-                _atomic(POINT, {"t": frame_t, "available": False, "reason": why, "candidates": []})
+                _atomic(POINT, {"t": cap, "time_base": "capture", "available": False, "reason": why, "candidates": []})
                 return
             pix = gb_metric.pointing_pixel(pts, image.width, image.height)
             if not pix:
-                _atomic(POINT, {"t": frame_t, "available": True, "reason": "no_ray", "candidates": []})
+                _atomic(POINT, {"t": cap, "time_base": "capture", "available": True, "reason": "no_ray", "candidates": []})
                 return
             got = gb_metric.range_at_pixel(raw, pix[0], pix[1], scale, fx, fy, cx, cy)
             if not got:
-                _atomic(POINT, {"t": frame_t, "available": True, "reason": "no_depth", "candidates": []})
+                _atomic(POINT, {"t": cap, "time_base": "capture", "available": True, "reason": "no_depth", "candidates": []})
                 return
-            _atomic(POINT, {"t": frame_t, "available": True, "candidates": [{
+            _atomic(POINT, {"t": cap, "time_base": "capture", "available": True, "candidates": [{
                 "name": "pointed", "conf": 0.8, "depth_m": got["depth_m"], "depth_valid": True,
-                "depth_t": frame_t, "source": "depth", "unit": unit, "valid_pixels": got["valid_pixels"]}]})
+                "depth_t": cap, "source": "depth", "unit": unit, "valid_pixels": got["valid_pixels"]}]})
 
 
 def _people_dicts(people):
@@ -254,14 +282,12 @@ def _people_dicts(people):
     return gb_metric.people_from_dets(people)
 
 
-def _health_scale():
+def _header_stamp(msg):
     try:
-        body = json.load(open("/home/ubuntu/shared/gb_safety/health.json"))
-        if time.time() - float(body["t"]) > 3.0:
-            return None, None
-        return float(body.get("depth_scale_m") or 0), body.get("depth_unit")
-    except (OSError, ValueError, TypeError):
-        return None, None
+        st = msg.header.stamp
+        return float(st.sec) + float(st.nanosec) / 1e9
+    except Exception:
+        return None
 
 
 def _atomic(path, body):

@@ -290,13 +290,23 @@ def read_person_track(path=None, now=None):
     p = d.get("person") if isinstance(d, dict) else None
     if not isinstance(p, dict):
         return None
+    if p.get("time_base") not in (None, "capture"):
+        return None
     try:
+        import gb_metric
         age = now - float(p["t"])
         dist = float(p["depth_m"])
     except (KeyError, TypeError, ValueError):
         return None
-    if age < 0 or age > 0.5 or dist != dist or dist <= 0:
+    if not gb_metric.fresh_capture(p.get("t"), now) or dist != dist or dist <= 0:
         return None
+    if p.get("unit") == "documented_mm" and gb_metric.validated_depth_scale("mono16") is None:
+        return None
+    if p.get("depth_capture_t") is not None:
+        if not gb_metric.frames_paired(p.get("t"), p.get("depth_capture_t")):
+            return None
+        if not gb_metric.fresh_capture(p.get("depth_capture_t"), now):
+            return None
     if p.get("source") == "lidar":
         if "clearance_m" in p:
             try:
@@ -332,8 +342,11 @@ def read_sighting(path=None, now=None):
     person = body.get("person") if isinstance(body, dict) else None
     if not isinstance(person, dict) or person.get("ambiguous"):
         return None
+    if person.get("time_base") not in (None, "capture"):
+        return None
     try:
-        if now - float(person.get("t") or body.get("t")) > 0.5:
+        import gb_metric
+        if not gb_metric.fresh_capture(person.get("t"), now):
             return None
         conf = float(person["conf"])
     except (KeyError, TypeError, ValueError):

@@ -146,7 +146,16 @@ class Gate(Node):
                 return
             lidar_m = self.front if self.front is not None and math.isfinite(self.front) else None
             fwd = OB.center_raw(img, self.cam_k[2], self.cam_k[3])
-            scale, how = OB.resolve_depth_scale(m.encoding, None, lidar_m, forward_raw=fwd, tf_fresh=False)
+            documented = None
+            try:
+                import gb_metric
+                documented = gb_metric.validated_depth_scale(m.encoding)
+            except Exception:
+                documented = None
+            if documented:
+                scale, how = documented
+            else:
+                scale, how = OB.resolve_depth_scale(m.encoding, None, lidar_m, forward_raw=fwd, tf_fresh=False)
             if not scale:
                 self.log_throttle("depth unit unconfirmed (%s, %s); not used for range" % (m.encoding, how), 10.0)
                 return

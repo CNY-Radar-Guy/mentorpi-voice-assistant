@@ -9,6 +9,209 @@ import json, math, os
 
 MIN_PIXELS = 20
 PERSON_CONF = 0.75
+OBSERVATION_FRESH_S = 0.5
+CAPTURE_FUTURE_S = 0.05
+CAPTURE_DOMAIN_S = 60.0
+PAIR_MAX_S = 0.05
+MM_PER_COUNT = 0.001
+FEET_M = 2.1336
+FEET_CLOSER_THAN_TORSO_M = 0.0762
+TORSO_REFERENCE_M = FEET_M + FEET_CLOSER_THAN_TORSO_M
+FEW_PERCENT = 0.03
+
+
+def keep_latest(previous, arrived):
+    """The acquisition slot holds one frame. A new arrival replaces it."""
+    return arrived if arrived is not None else previous
+
+
+def capture_time(stamp_s, receive_t, future_s=CAPTURE_FUTURE_S, domain_s=CAPTURE_DOMAIN_S):
+    """Wall-clock capture from a ROS header. Receipt time is not a substitute.
+
+    Zero, pre-unix, future, and other-clock stamps fail closed.
+    A stamp 0.35 s behind receipt is still this clock.
+    """
+    try:
+        stamp = float(stamp_s)
+        receive = float(receive_t)
+    except (TypeError, ValueError):
+        return None, "capture_stamp_missing"
+    if stamp != stamp or receive != receive or stamp <= 0 or stamp < 1e9:
+        return None, "capture_stamp_zero"
+    age = receive - stamp
+    if age < -float(future_s):
+        return None, "capture_stamp_future"
+    if age > float(domain_s):
+        return None, "capture_stamp_clock"
+    return stamp, "ok"
+
+
+def frames_paired(rgb_t, depth_t, max_delta=PAIR_MAX_S):
+    """True when two capture stamps are the same exposure, within max_delta."""
+    try:
+        return abs(float(rgb_t) - float(depth_t)) <= float(max_delta)
+    except (TypeError, ValueError):
+        return False
+
+
+def fresh_capture(capture_t, now, limit=OBSERVATION_FRESH_S):
+    """Age of the capture. A later write time cannot make it fresh."""
+    try:
+        age = float(now) - float(capture_t)
+    except (TypeError, ValueError):
+        return False
+    return 0 <= age <= float(limit)
+
+
+def stamp_observation(body, capture_t, receive_t, write_t, infer_s=None):
+    """Publish capture as t. write_t and receive_t stay diagnostic fields."""
+    body = dict(body or {})
+    person = dict(body["person"]) if isinstance(body.get("person"), dict) else None
+    try:
+        receive = float(receive_t)
+        written = float(write_t)
+    except (TypeError, ValueError):
+        receive, written = None, None
+    body["time_base"] = "capture"
+    body["receive_t"] = receive
+    body["write_t"] = written
+    cap = None
+    try:
+        if capture_t is not None:
+            cap = float(capture_t)
+    except (TypeError, ValueError):
+        cap = None
+    if cap is None:
+        body.pop("t", None)
+        body["capture_ok"] = False
+        if person is not None:
+            person.pop("t", None)
+            person["time_base"] = "capture"
+            body["person"] = person
+        return body
+    body["t"] = cap
+    body["capture_ok"] = True
+    if infer_s is not None:
+        try:
+            body["infer_s"] = float(infer_s)
+        except (TypeError, ValueError):
+            pass
+    body["latency_s"] = None if written is None else written - cap
+    if person is not None:
+        person["t"] = cap
+        person["time_base"] = "capture"
+        person["receive_t"] = receive
+        person["write_t"] = written
+        if body.get("latency_s") is not None:
+            person["latency_s"] = body["latency_s"]
+        body["person"] = person
+    return body
+
+
+def _rel_error(raw, reference):
+    metres = float(raw) * MM_PER_COUNT
+    return (metres - float(reference)) / float(reference)
+
+
+def assess_depth_record(body):
+    """Nominal 0.001 m per count, or a reason. The scale is not fitted to the tape.
+
+    The authorised reference is 7 ft to the feet plus 3 in (0.0762 m) because
+    the feet were closer than the torso sample: 2.2098 m. LiDAR extrinsics are
+    not required. A health flag or a person-track file is not this record.
+    """
+    if not isinstance(body, dict):
+        return {"ok": False, "reason": "no_scale_record", "errors": []}
+    if "fit_factor" in body or "multiplier" in body:
+        return {"ok": False, "reason": "fit_factor_not_allowed", "errors": []}
+    try:
+        if float(body.get("scale_m_per_count")) != MM_PER_COUNT:
+            return {"ok": False, "reason": "scale_not_nominal_mm", "errors": []}
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "scale_not_nominal_mm", "errors": []}
+    prov = body.get("provenance") if isinstance(body.get("provenance"), dict) else {}
+    try:
+        tape_ok = prov.get("tape") == "7ft_to_feet"
+        offset = float(prov.get("feet_closer_than_torso_m"))
+        reference = float(prov.get("reference_m"))
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "provenance_incomplete", "errors": []}
+    if not tape_ok or prov.get("landmark") != "torso":
+        return {"ok": False, "reason": "provenance_incomplete", "errors": []}
+    if abs(offset - FEET_CLOSER_THAN_TORSO_M) > 1e-9:
+        return {"ok": False, "reason": "body_offset_not_3in", "errors": []}
+    if abs(reference - TORSO_REFERENCE_M) > 1e-9 or abs((FEET_M + offset) - reference) > 1e-9:
+        return {"ok": False, "reason": "reference_not_corrected", "errors": []}
+    cam = body.get("camera") if isinstance(body.get("camera"), dict) else {}
+    encoding = str(cam.get("encoding") or "")
+    if cam.get("align_mode") is not True or cam.get("depth_correction") is not True:
+        return {"ok": False, "reason": "alignment_not_logged", "errors": []}
+    if encoding not in ("mono16", "16UC1"):
+        return {"ok": False, "reason": "encoding_not_mono16", "errors": []}
+    try:
+        if int(cam.get("width")) != 640 or int(cam.get("height")) != 400:
+            return {"ok": False, "reason": "size_not_640x400", "errors": []}
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "size_not_640x400", "errors": []}
+    if cam.get("rgb_frame_id") not in (None, "rgb_camera_link"):
+        return {"ok": False, "reason": "camera_identity", "errors": []}
+    if cam.get("depth_frame_id") not in (None, "depth_camera_link"):
+        return {"ok": False, "reason": "camera_identity", "errors": []}
+    samples = body.get("samples")
+    if not isinstance(samples, list) or len(samples) != 3:
+        return {"ok": False, "reason": "need_three_paired_samples", "errors": []}
+    errors = []
+    captures = []
+    for sample in samples:
+        if not isinstance(sample, dict) or sample.get("people") != 1:
+            return {"ok": False, "reason": "not_one_person", "errors": errors}
+        try:
+            conf = float(sample.get("conf"))
+            raw = float(sample.get("raw_median"))
+            rgb_t = float(sample.get("rgb_capture_t"))
+            depth_t = float(sample.get("depth_capture_t"))
+        except (TypeError, ValueError):
+            return {"ok": False, "reason": "sample_incomplete", "errors": errors}
+        if conf < PERSON_CONF:
+            return {"ok": False, "reason": "confidence_below_0.75", "errors": errors}
+        if raw <= 0 or rgb_t < 1e9 or depth_t < 1e9 or not frames_paired(rgb_t, depth_t):
+            return {"ok": False, "reason": "sample_stamps_not_paired", "errors": errors}
+        err = _rel_error(raw, reference)
+        if abs(err) > FEW_PERCENT:
+            return {"ok": False, "reason": "outside_few_percent", "errors": errors + [err]}
+        if "error" in sample:
+            try:
+                if abs(float(sample["error"]) - err) > 1e-6:
+                    return {"ok": False, "reason": "error_not_preserved", "errors": errors}
+            except (TypeError, ValueError):
+                return {"ok": False, "reason": "error_not_preserved", "errors": errors}
+        errors.append(err)
+        captures.append(rgb_t)
+    if max(captures) - min(captures) > OBSERVATION_FRESH_S:
+        return {"ok": False, "reason": "samples_not_one_set", "errors": errors}
+    return {"ok": True, "scale": MM_PER_COUNT, "unit": "documented_mm", "reason": "documented_mm", "errors": errors}
+
+
+def load_depth_record(path=None):
+    if path is None:
+        import gb_paths
+        path = gb_paths.depth_scale_record_path()
+    try:
+        with open(path) as f:
+            body = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def validated_depth_scale(encoding, path=None):
+    """(0.001, documented_mm) only when the logged record passes. Otherwise None."""
+    if str(encoding or "") not in ("mono16", "16UC1"):
+        return None
+    found = assess_depth_record(load_depth_record(path))
+    if not found.get("ok"):
+        return None
+    return found["scale"], found["unit"]
 
 
 def json_number(value):
@@ -176,7 +379,7 @@ def apply_tf(point, rotation_xyzw, translation):
 
 def track_record(now, depth_m, bearing, conf, unit, valid_pixels, source, map_xy=None, ambiguous=False):
     """The file the follow loop reads. No field is filled in from a name or a guess."""
-    if ambiguous or depth_m is None or unit not in ("crosscheck_mm", "crosscheck_m", "32FC1_metres", "lidar"):
+    if ambiguous or depth_m is None or unit not in ("crosscheck_mm", "crosscheck_m", "32FC1_metres", "lidar", "documented_mm"):
         return {"t": float(now), "person": {"t": float(now), "ambiguous": True}}
     person = {
         "t": float(now),
@@ -271,4 +474,6 @@ def sighting_record(now, people, range_obs=None):
     else:
         person["reason"] = "depth_unit_unconfirmed"
         person["lidar_reason"] = "extrinsics_not_validated"
+        if obs.get("scale_reason"):
+            person["scale_reason"] = obs.get("scale_reason")
     return {"t": now, "detect_ok": True, "person": person}
