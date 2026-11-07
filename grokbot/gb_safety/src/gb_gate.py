@@ -97,7 +97,7 @@ class Gate(Node):
         self.mode = "idle"; self.lin = 0.0; self.ang = 0.0; self.src = ""; self.rid = ""
         self.deadline = 0.0; self.t_start = 0.0; self.t_fresh = 0.0; self.zero_until = 0.0; self.last_zero = 0.0
         self.turn = None; self.yaw = None; self.yaw_src = None; self.yaw_t = 0.0
-        self.ox = 0.0; self.oy = 0.0; self.look = None; self.lease_id = ""; self.poses = {}
+        self.ox = 0.0; self.oy = 0.0; self.look = None; self.lease_id = ""; self.look_mono0 = None; self.poses = {}
         self.estop = os.path.exists(ESTOP); self.maint = os.path.exists(MAINT); self.last_why = "start"; self.n_out = 0; self.last_pub = (None, None)
         import collections; self.seen = collections.deque(maxlen=256)
         self.joy = {"present": False, "lin": 0.0, "ang": 0.0, "t": 0.0}
@@ -293,13 +293,15 @@ class Gate(Node):
                     cap = float(d.get("cap", gb_bounded.CAP_S))
                 except (TypeError, ValueError):
                     cap = gb_bounded.CAP_S
-                self.look.begin(now, pinned[:3], cap, source="/odom", frame="odom", child="base_footprint",
+                self.look_mono0 = time.monotonic()
+                self.look.begin(self.look_mono0, pinned[:3], cap, source="/odom", frame="odom", child="base_footprint",
                                 lidar_yaw=gb_bounded.LIDAR_YAW_RAD)
                 if not self.look.active:
                     self.look = None
+                    self.look_mono0 = None
                     self.log("REFUSED bounded id=%s: %s" % (rid, "source")); return
                 self.mode = "bounded"; self.src = src; self.rid = rid; self.lease_id = intent; self.t_start = now
-                self.deadline = now + self.look.cap; self.lin = 0.0; self.ang = 0.0; self.turn = None
+                self.deadline = self.look_mono0 + self.look.cap; self.lin = 0.0; self.ang = 0.0; self.turn = None
                 self.log("START bounded id=%s src=%s cap=%.0fs source=/odom home=(%.2f,%.2f)"
                          % (rid, src, self.look.cap, pinned[0], pinned[1]))
             elif op == "turn":
@@ -448,6 +450,7 @@ class Gate(Node):
         if self.look is not None:
             self.look.cancel(why); self.look = None
         self.lease_id = ""
+        self.look_mono0 = None
         try:
             import gb_intent
             gb_intent.clear_envelope(time.monotonic(), why)
@@ -536,7 +539,7 @@ class Gate(Node):
                     if self.look is not None:
                         self.look.cancel("sensors_stale")
                     self.finish("bounded sensors stale"); return
-                cmd = self.look.step(now, self.front, self.rear, self.sweep, pinned[:3],
+                cmd = self.look.step(time.monotonic(), self.front, self.rear, self.sweep, pinned[:3],
                                      now - self.scan_t, pinned[3], estop=self.estop, source="/odom")
                 if not cmd.get("allow"):
                     self.finish("bounded " + str(cmd.get("reason"))); return

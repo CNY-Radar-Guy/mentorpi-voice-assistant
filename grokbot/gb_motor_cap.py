@@ -20,6 +20,8 @@ WHEELBASE = 0.1368
 TRACK_WIDTH = 0.1446
 WHEEL_DIAMETER = 0.075
 SOURCE = "odom_publisher_node.py app_cmd_vel_callback ±0.2 m/s ±0.5 rad/s; MecanumChassis wheel_diameter 0.075 track_width 0.1446 wheelbase 0.1368"
+CORRECTION_YAML = "/home/ubuntu/software/chassis_adjustment/robot_correction_factors.yaml"
+STRAIGHT_CORRECTION_FACTOR = 5.50
 
 
 def _span():
@@ -62,6 +64,41 @@ def tank_rps_map(lin, ang, linear_y=0.0):
     motor4 = vx - vy + w * span
     raw = (-motor1, -motor2, motor3, motor4)
     return [(i + 1, mps_to_rps(v)) for i, v in enumerate(raw)]
+
+
+def load_track_correction(path=None):
+    """Left and right factors from the same file odom_publisher reads.
+
+    The incident archive did not contain robot_correction_factors.yaml.
+    A missing file uses 1.0 and 1.0, which is that publisher's own fallback.
+    """
+    path = path or os.environ.get("GB_CORRECTION_YAML") or CORRECTION_YAML
+    left = right = 1.0
+    try:
+        import yaml
+        with open(path) as handle:
+            factors = yaml.safe_load(handle) or {}
+        if isinstance(factors, dict):
+            left = float(factors.get("left_correction_factor", 1.0))
+            right = float(factors.get("right_correction_factor", 1.0))
+    except Exception:
+        left = right = 1.0
+    if left != left or right != right or math.isinf(left) or math.isinf(right):
+        return 1.0, 1.0
+    return left, right
+
+
+def correct_tank_twist(lin, ang, left=1.0, right=1.0):
+    """The tank branch in odom_publisher cmd_vel_callback, before set_velocity.
+
+    Only a straight non-negative command is rewritten, and only when a factor
+    is not 1. Turning commands are unchanged. linear_y stays 0.
+    """
+    lin = float(lin)
+    ang = float(ang)
+    if lin >= 0.0 and ang == 0.0 and (float(left) != 1.0 or float(right) != 1.0):
+        ang = lin * (float(right) - float(left)) * STRAIGHT_CORRECTION_FACTOR
+    return lin, ang
 
 
 def motors_match_twist(pairs, lin, ang, tol=1e-4):
