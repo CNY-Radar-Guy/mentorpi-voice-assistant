@@ -1,0 +1,15 @@
+[Unit]
+Description=Grok Bot range health publisher (container, no velocity)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/grokbot
+ExecStart=/bin/bash /home/pi/grokbot/gb_safety/gb_safety_run.sh health
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

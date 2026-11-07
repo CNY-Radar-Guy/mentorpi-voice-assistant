@@ -1,0 +1,21 @@
+[Unit]
+Description=Grok Bot voice assistant (MentorPi)
+After=network-online.target sound.target docker.service ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+SupplementaryGroups=audio dialout
+WorkingDirectory=/home/pi/grokbot
+EnvironmentFile=/home/pi/grokbot/grokbot.env
+EnvironmentFile=-/home/pi/grokbot/secrets.env
+Environment=PYTHONUNBUFFERED=1 HOME=/home/pi
+ExecStartPre=/bin/sleep 8
+ExecStart=/home/pi/grokbot/venv/bin/python /home/pi/grokbot/grokbot_voice.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

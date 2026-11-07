@@ -1,0 +1,19 @@
+[Unit]
+Description=Grok Bot double-clap e-stop (disabled until a quiet-gate check; activation does not enable this)
+After=sound.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=pi
+SupplementaryGroups=audio
+WorkingDirectory=/home/pi/grokbot
+Environment=PYTHONUNBUFFERED=1 HOME=/home/pi
+ExecStart=/usr/bin/python3 /home/pi/grokbot/gb_safety/gb_clap.py
+Restart=always
+RestartSec=1
+Nice=-15
+IOSchedulingClass=realtime
+
+[Install]
+WantedBy=multi-user.target

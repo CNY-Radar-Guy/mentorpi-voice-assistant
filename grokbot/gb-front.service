@@ -1,0 +1,16 @@
+[Unit]
+Description=Optional read-only router for phone port 8080 (inactive unless preflight passed)
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/grokbot
+Environment=STREAM_FRONT_ENABLE=0
+Environment=STREAM_BIND=192.168.50.125
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/pi/grokbot/venv/bin/python /home/pi/grokbot/gb_front.py
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

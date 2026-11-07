@@ -1,0 +1,19 @@
+[Unit]
+Description=Admitted motor commands inside the ROS container. Does not clear MAINT.
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/grokbot
+# The host Python has no rclpy. Do not ExecStart /usr/bin/python3 on this node.
+# The release drop-in sets GB_TREE to releases/<id>. Without that the launcher exits.
+# Inside the container the hold is /home/ubuntu/shared/gb_safety/MAINT.
+ExecStart=/bin/bash /home/pi/grokbot/gb_safety/gb_safety_run.sh actuation
+Restart=on-failure
+RestartSec=2
+# Do not disable gb-watchdog. Do not remove MAINT. Do not remap the controller from this unit.
+
+[Install]
+WantedBy=multi-user.target
