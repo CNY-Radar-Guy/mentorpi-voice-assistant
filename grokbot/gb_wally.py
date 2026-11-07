@@ -144,12 +144,22 @@ def autonomy_blockers(health_snap, track, controller_ok, now=None):
 def _follow_demand(active):
     try:
         import gb_demand
-        path = os.environ.get("GB_DEMAND_FILE", "/home/pi/docker/tmp/gb_safety/demand.json")
+        import gb_paths
+        path = gb_paths.demand_path()
         current = gb_demand.read_demand(path)
         if active:
             gb_demand.write_demand(path, "follow")
-        elif current == "follow":
+        elif current in ("follow", "acquire"):
             gb_demand.write_demand(path, "idle")
+    except Exception:
+        return
+
+
+def _follow_demand_mode(mode):
+    try:
+        import gb_demand
+        import gb_paths
+        gb_demand.write_demand(gb_paths.demand_path(), mode)
     except Exception:
         return
 
@@ -239,7 +249,7 @@ def tick_runtime(now=None):
         maint = False
     fl = follow_loop()
     if fl.active:
-        track = read_person_track(os.environ.get("PERSON_TRACK_FILE", ""), now)
+        track = read_person_track(os.environ.get("PERSON_TRACK_FILE") or __import__("gb_paths").person_track_path(), now)
         cmd = fl.step(now, gb_health.read_shared(now=now), track, _autonomy, protections, maint=maint)
         if cmd.get("allow") and (cmd.get("lin") or cmd.get("ang")):
             _publish(cmd)
@@ -264,8 +274,11 @@ def tick_runtime(now=None):
                     _publish({"op": "stop", "allow": False, "reason": step.get("why") or step.get("phase")})
 
 
-def read_person_track(path, now=None):
-    """A person range from a file the parent points at. No path means no range, not a guess."""
+def read_person_track(path=None, now=None):
+    """A person range from the canonical track file. No measured distance is not a range."""
+    if path is None:
+        import gb_paths
+        path = gb_paths.person_track_path()
     if not path:
         return None
     now = time.time() if now is None else float(now)
@@ -303,6 +316,31 @@ def read_person_track(path, now=None):
             "conf": conf, "ambiguous": bool(p.get("ambiguous")), "unit": p.get("unit"),
             "depth_age": age if source == "depth" else 0.0,
             "name_ignored": str(p.get("name") or "").lower() == "john"}
+
+
+def read_sighting(path=None, now=None):
+    """A detection that may have no range. Not permission to move."""
+    if path is None:
+        import gb_paths
+        path = gb_paths.person_track_path()
+    now = time.time() if now is None else float(now)
+    try:
+        with open(path) as f:
+            body = json.load(f)
+    except (OSError, ValueError):
+        return None
+    person = body.get("person") if isinstance(body, dict) else None
+    if not isinstance(person, dict) or person.get("ambiguous"):
+        return None
+    try:
+        if now - float(person.get("t") or body.get("t")) > 0.5:
+            return None
+        conf = float(person["conf"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if conf < gb_follow.CONF_MIN:
+        return None
+    return person
 
 
 def follow_once(health_snap, track, autonomy, protections=None):
@@ -377,10 +415,15 @@ def handle(text, protections=None):
         drop_goals("autonomy-off")
         return "Autonomy is off. I dropped the trip and I am not moving."
     if asked == "on":
-        track = read_person_track(os.environ.get("PERSON_TRACK_FILE", ""))
+        track = read_person_track()
         missing = autonomy_blockers(gb_health.read_shared(), track, controller_heartbeat(), time.time())
+        sight = read_sighting()
+        if sight and not track:
+            missing = [item for item in missing if "measured person" not in item and "person track" not in item]
+            missing.append("a measured range; the depth unit is not confirmed and the camera-to-lidar extrinsics are not validated")
         if missing:
-            return "Autonomy stays off. I still need " + ", ".join(missing) + ". I am not moving."
+            _follow_demand_mode("acquire")
+            return "Autonomy stays off. I still need " + ", ".join(missing) + ". I asked the camera to look, and I am not moving."
         set_autonomy(True)
         return "Autonomy is on for a new follow only. I am not starting the last trip, and I have not moved."
     if re.search(r"\b(reboot|restart yourself|power off the pi|shut ?down the pi)\b", t):
@@ -390,6 +433,9 @@ def handle(text, protections=None):
     taught = teacher().hear(t, _default_capture)
     if taught:
         return taught
+    if re.search(r"\b(look for a person|acquire|find a person)\b", t):
+        _follow_demand_mode("acquire")
+        return "I am looking for a person. Autonomy is unchanged and I am not moving."
     if re.search(r"\b(follow me|stay with me|drive toward me|come to me|come here)\b", t):
         try:
             import gb_maint
@@ -410,7 +456,7 @@ def handle(text, protections=None):
             if track is not None and "conf" not in track:
                 track = dict(track, conf=track.get("conf"))
         else:
-            track = read_person_track(os.environ.get("PERSON_TRACK_FILE", ""))
+            track = read_person_track()
         fl = follow_loop()
         now = time.time()
         if not _autonomy:

@@ -143,6 +143,7 @@ else
     exit 1
   fi
 fi
+export GB_SHARED_DIR=/home/ubuntu/shared/gb_safety
 NODE=gb_$WHAT.py
 [ "$WHAT" = "health" ] && NODE=gb_health_node.py
 [ "$WHAT" = "rgbguard" ] && export GB_RGB_MODEL=$CONT_CODE/yolov8n.onnx

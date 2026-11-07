@@ -162,6 +162,35 @@ def center_raw(image, cx=None, cy=None, radius=2):
     return float(np.median(vals))
 
 
+def lidar_person_range(beams, bearing_rad, calibration):
+    """Range of the beam at the person's bearing. Not the forward-corridor minimum.
+
+    calibration must already say validated and include a measured camera-to-lidar
+    offset and yaw. This function does not invent those numbers.
+    """
+    if not isinstance(calibration, dict) or calibration.get("validated") is not True:
+        return None
+    for key in ("x_m", "y_m", "z_m", "yaw_rad", "measured_at"):
+        if calibration.get(key) is None:
+            return None
+    try:
+        target = float(bearing_rad) + float(calibration["yaw_rad"])
+    except (TypeError, ValueError):
+        return None
+    import math
+    best = None
+    for item in beams or ():
+        try:
+            ang, rng = float(item[0]), float(item[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if rng != rng or rng <= 0.05 or abs(ang - target) > math.radians(2.0):
+            continue
+        if best is None or rng < best:
+            best = rng
+    return best
+
+
 def lidar_forward_m(ranges, angle_min, angle_increment, half_rad=None):
     """Median range in the forward cone. Not the median of the whole scan."""
     import math

@@ -38,3 +38,30 @@ def shared_estop():
 
 def speaking_flag():
     return os.path.join(data_dir(), "speaking.json")
+
+
+def shared_dir():
+    """Directory both the host voice and the container tracker use for state.
+
+    On the host this is the directory of the shared ESTOP file. In the container
+    the launcher sets GB_SHARED_DIR to /home/ubuntu/shared/gb_safety. Those are
+    the same bind.
+    """
+    explicit = os.environ.get("GB_SHARED_DIR")
+    if explicit:
+        return os.path.expanduser(explicit)
+    return os.path.dirname(shared_estop())
+
+
+def demand_path():
+    explicit = os.environ.get("GB_DEMAND_FILE")
+    if explicit:
+        return os.path.expanduser(explicit)
+    return os.path.join(shared_dir(), "demand.json")
+
+
+def person_track_path():
+    explicit = os.environ.get("PERSON_TRACK_FILE")
+    if explicit:
+        return os.path.expanduser(explicit)
+    return os.path.join(shared_dir(), "person_track.json")

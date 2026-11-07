@@ -83,8 +83,9 @@ class RgbGuard(Node):
         mode = self.demand()
         if self.moving:
             self._held_motion = True
-        want = self.moving or mode in ("follow", "point", "view")
-        want_depth = self.moving or mode in ("follow", "point")
+        import gb_demand
+        want = gb_demand.tracker_wants(mode, self.moving)
+        want_depth = self.moving or mode in ("follow", "point", "acquire")
         if want and self.sub is None:
             self.sub = self.create_subscription(Image, TOPIC, self.on_img, qos_profile_sensor_data)
         if want_depth and self.depth_sub is None and self.sub is not None:
@@ -125,10 +126,9 @@ class RgbGuard(Node):
         while rclpy.ok():
             m = self.img
             mode = self.demand()
-            view_only = (not self.moving) and mode == "view"
             import gb_demand
-            period = gb_demand.view_period(self._last_infer) if view_only else (1.0 / HZ)
-            if (not self.moving and mode not in ("follow", "point", "view")) or m is None or self.img_t <= self.done_t or time.time() - self.done_t < period:
+            period = gb_demand.tracker_period(mode, self.moving, self._last_infer)
+            if (not gb_demand.tracker_wants(mode, self.moving)) or m is None or self.img_t <= self.done_t or time.time() - self.done_t < period:
                 time.sleep(0.05); continue
             self.done_t = time.time()
             try:
@@ -160,9 +160,14 @@ class RgbGuard(Node):
         except Exception:
             return
         mode = self.demand()
-        if mode not in ("follow", "point"):
+        if mode not in ("follow", "point", "acquire"):
+            return
+        if mode == "acquire" and (self.depth is None or self.k is None or time.time() - self.depth_t > 0.5):
+            _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people)))
             return
         if self.depth is None or self.k is None or time.time() - self.depth_t > 0.5:
+            if mode in ("follow", "acquire"):
+                _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people)))
             return
         import numpy as np
         depth = self.depth
@@ -173,11 +178,14 @@ class RgbGuard(Node):
             import gb_obstacle
             raw = gb_obstacle.decode_depth(depth.encoding, bytes(depth.data), depth.height, depth.width, depth.step, getattr(depth, "is_bigendian", 0))
             if raw is None:
+                _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people)))
                 return
             scale, unit = _health_scale()
             if unit not in ("crosscheck_mm", "crosscheck_m"):
+                _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people)))
                 return
         else:
+            _atomic(TRACK, gb_metric.sighting_record(frame_t, _people_dicts(people)))
             return
         fx, fy, cx, cy = self.k
         if mode == "follow":
@@ -207,6 +215,10 @@ class RgbGuard(Node):
             _atomic(POINT, {"t": frame_t, "available": True, "candidates": [{
                 "name": "pointed", "conf": 0.8, "depth_m": got["depth_m"], "depth_valid": True,
                 "depth_t": frame_t, "source": "depth", "unit": unit, "valid_pixels": got["valid_pixels"]}]})
+
+
+def _people_dicts(people):
+    return [{"conf": p[1], "box": [p[2], p[3], p[4], p[5]]} for p in people]
 
 
 def _health_scale():

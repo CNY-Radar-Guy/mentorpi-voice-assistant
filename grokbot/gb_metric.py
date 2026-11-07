@@ -154,3 +154,37 @@ def track_record(now, depth_m, bearing, conf, unit, valid_pixels, source, map_xy
         person["x"] = float(map_xy[0])
         person["y"] = float(map_xy[1])
     return {"t": float(now), "person": person}
+
+
+def sighting_record(now, people, range_obs=None):
+    """Detection without inventing a range.
+
+    people are {conf, box}. range_obs may carry a depth measurement only when
+    its unit is already validated, or a lidar range only when extrinsics_validated
+    is true. Otherwise the person is recorded with a reason and no distance.
+    """
+    now = float(now)
+    people = [p for p in (people or []) if isinstance(p, dict)]
+    if not people:
+        return {"t": now, "detect_ok": True, "person": None, "reason": "no_person"}
+    if len(people) > 1:
+        return {"t": now, "detect_ok": True, "person": {"t": now, "ambiguous": True,
+                "conf": max(float(p.get("conf") or 0) for p in people)}}
+    one = people[0]
+    person = {"t": now, "conf": float(one.get("conf") or 0), "box": list(one.get("box") or []),
+              "ambiguous": False, "name": None}
+    obs = range_obs or {}
+    source = obs.get("source")
+    if source == "depth" and obs.get("depth_m") is not None and obs.get("unit") in (
+            "crosscheck_mm", "crosscheck_m", "32FC1_metres"):
+        person.update(depth_m=float(obs["depth_m"]), source="depth", unit=obs["unit"],
+                      bearing=float(obs.get("bearing") or 0.0))
+    elif source == "lidar" and obs.get("extrinsics_validated") is True and obs.get("depth_m") is not None:
+        person.update(depth_m=float(obs["depth_m"]), source="lidar", unit="lidar",
+                      bearing=float(obs.get("bearing") or 0.0))
+        if obs.get("clearance_m") is not None:
+            person["clearance_m"] = float(obs["clearance_m"])
+    else:
+        person["reason"] = "depth_unit_unconfirmed"
+        person["lidar_reason"] = "extrinsics_not_validated"
+    return {"t": now, "detect_ok": True, "person": person}

@@ -7,8 +7,9 @@ permission to drive.
 """
 import json, os, time
 
-MODES = ("follow", "point", "view")
+MODES = ("follow", "point", "view", "acquire")
 VIEW_TTL = 2.0
+ACQUIRE_TTL = 20.0
 VIEW_DUTY = 0.12
 
 
@@ -24,8 +25,20 @@ def view_period(infer_s, duty=VIEW_DUTY, min_s=2.0, max_s=8.0):
 
 
 def moves(mode):
-    """View wakes the camera worker only. It is not a motor command."""
+    """Follow and point are motor modes. View and acquire only wake the camera."""
     return mode in ("follow", "point")
+
+
+def tracker_wants(mode, moving=False):
+    """Camera subscription. Acquire does not require motion or a viewer."""
+    return bool(moving or mode in ("follow", "point", "view", "acquire"))
+
+
+def tracker_period(mode, moving, infer_s):
+    """Acquire and view stay on the low duty. Follow while active may run at 1 Hz."""
+    if mode in ("view", "acquire") and not moving:
+        return view_period(infer_s)
+    return 1.0
 
 
 def write_demand(path, mode, now=None):
@@ -51,7 +64,7 @@ def read_demand(path, now=None, ttl=None):
     except (OSError, ValueError, KeyError, TypeError):
         return None
     if ttl is None:
-        ttl = VIEW_TTL if mode == "view" else 30.0
+        ttl = VIEW_TTL if mode == "view" else (ACQUIRE_TTL if mode == "acquire" else 30.0)
     if age < 0 or age > float(ttl) or mode not in MODES:
         return None
     return mode
