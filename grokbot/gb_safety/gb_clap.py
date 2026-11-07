@@ -195,7 +195,7 @@ def daemon():
         x = np.frombuffer(b, dtype=np.int16).astype(np.float32) / 32768.0
         det.speaking = speaker_busy(spk)
         for ev in det.process(x):
-            test = float(cfg.get("test_until", 0) or 0) > time.time()
+            test = not gb_clap_logic.latch_enabled(cfg)
             if test or time.time() - last_fire > 4.0:              # 4 s hold-off: never re-fire on our own 'Emergency stop'
                 last_fire = time.time(); fire(ev, test)
         now = time.time()

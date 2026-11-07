@@ -745,7 +745,7 @@ ESTOP_ACTIONS = {"explore": lambda: _explore().abort("ESTOP"), "features": lambd
                  "track": _stop_track, "nav2": _nav2_stop}
 
 def do_estop(why="", src="voice"):
-    """THE kill switch: latch file, zero, cancel missions/follow/tracker/Nav2/features. Latched until an explicit unlock."""
+    """Persistent emergency lock. Used for a deliberate 'emergency stop', not for a plain halt."""
     try:
         import gb_wally
         gb_wally.drop_goals("estop")
@@ -753,6 +753,39 @@ def do_estop(why="", src="voice"):
         log("drop goals failed:", ex)
     gb_estop.estop(src, why, actions=ESTOP_ACTIONS)
     return "Emergency stop. Motors are latched off. Say unlock or resume when it's safe. I will not continue the old trip."
+
+def do_halt(why=""):
+    """Cancel the current motion without writing an ESTOP file. Does not clear a fault or a clap stop."""
+    try:
+        import gb_wally
+        gb_wally.drop_goals("halt")
+    except Exception as ex:
+        log("drop goals failed:", ex)
+    try:
+        _explore().abort("halt")
+    except Exception as ex:
+        log("explore abort failed:", ex)
+    try:
+        gb_features.emergency_stop()
+    except Exception as ex:
+        log("feature halt failed:", ex)
+    try:
+        gb_estop.gate_request({"op": "stop", "src": "halt"})
+    except Exception as ex:
+        log("gate halt failed:", ex)
+    try:
+        gb_estop.zero_now("halt")
+    except Exception as ex:
+        log("zero halt failed:", ex)
+    return "Stopped. I cancelled that motion and I did not latch the emergency lock. I am not continuing the old trip."
+
+def respond_stop(text, why, moving=False):
+    action = gb_estop.stop_action(text, moving=moving)
+    if action == "latch":
+        return do_estop(why)
+    if action == "halt":
+        return do_halt(why)
+    return None
 
 def do_resume():
     """Unlock clears a normal stop only. It does not resume a goal, a follow, or a mission."""
@@ -829,8 +862,9 @@ def do_timed(p):
 
 def estop_intent(text):
     """Runs FIRST for every voice and chat command. Returns a reply or None."""
-    if gb_estop.kill_phrase(text, moving=_moving()):
-        return do_estop("command: " + text[:120])
+    hit = respond_stop(text, "command: " + text[:120], moving=_moving())
+    if hit:
+        return hit
     if gb_estop.resume_phrase(text):
         return do_resume()
     t = gb_estop._norm(text)
@@ -858,7 +892,7 @@ def estop_intent(text):
     return None
 
 def do_stop():
-    return do_estop("stop intent")
+    return do_halt("stop intent")
 
 def _old_do_stop():
     try: aborted = _explore().abort("stop command")
@@ -1546,14 +1580,15 @@ def stop_listener():
             if not tx: continue
             echo = self_playing(0.5) or heard_over_playback(t_s - 3 * FRAME_MS / 1000.0)   # segment overlapped any playback (+0.5 s)
             dec = barge_decide(tx) if echo else None
-            if (dec["action"] == "kill") if echo else gb_estop.kill_phrase(tx, moving=True):
+            if (dec["action"] == "kill") if echo else gb_estop.stop_action(tx, moving=True):
                 if not gb_estop.is_set():
                     log(f"[ESTOP] barge-in kill phrase: {tx!r}")
-                    do_estop("voice (barge-in): " + tx)
-                    threading.Thread(target=speak, args=("Emergency stop.",), daemon=True).start()
+                    reply = respond_stop(tx, "voice (barge-in): " + tx, moving=True)
+                    if reply:
+                        threading.Thread(target=speak, args=(reply,), daemon=True).start()
                 elif relatch_allowed(tx, t_a - 3 * FRAME_MS / 1000.0, "stop listener"):   # latched: re-latch only if not our own voice
                     log(f"[ESTOP] barge-in kill phrase while latched (re-latch): {tx!r}")
-                    do_estop("voice (barge-in): " + tx)
+                    respond_stop(tx, "voice (barge-in): " + tx, moving=True)
             elif dec and dec["action"] in ("drive", "latched"):   # drive command over our speech: cut TTS, run it
                 threading.Thread(target=_barge_run, args=(dec, "stop listener"), daemon=True).start()
             elif dec and dec["action"] == "resume":              # 'resume' over our speech while latched (echo-filtered)
@@ -1681,7 +1716,7 @@ def voice_loop():
                     dec = barge_decide(tx) if tx else None
                     if dec and dec["action"] == "kill":
                         if not gb_estop.is_set() or relatch_allowed(tx, mic.t_onset, "main mic, overlapped"):   # first latch: unfiltered
-                            log(f"[ESTOP] kill phrase during playback: {tx!r}"); speak(do_estop("voice (during speech): " + tx))
+                            log(f"[ESTOP] kill phrase during playback: {tx!r}"); speak(respond_stop(tx, "voice (during speech): " + tx, moving=True) or "")
                     elif dec and dec["action"] in ("drive", "latched"):   # drive over our speech: no wake word needed
                         reply = barge_drive(dec, "main mic")
                         if reply:
@@ -1726,11 +1761,11 @@ def voice_loop():
             if not text:
                 continue
             # KILL SWITCH FIRST: every transcript, wake word or not, awake or not
-            if gb_estop.kill_phrase(text, moving=_moving()):
-                log(f"[ESTOP] kill phrase heard (no wake word needed): {text!r}")
+            if gb_estop.stop_action(text, moving=_moving()):
+                log(f"[ESTOP] stop heard (no wake word needed): {text!r}")
                 if gb_estop.is_set() and not relatch_allowed(text, mic.t_onset, "main mic"):   # first latch: unfiltered
                     continue
-                speak(do_estop("voice: " + text)); awake_until = 0.0; continue
+                speak(respond_stop(text, "voice: " + text, moving=_moving()) or ""); awake_until = 0.0; continue
             if gb_estop.is_set() and gb_estop.resume_phrase(text):
                 speak(do_resume()); continue
             try:

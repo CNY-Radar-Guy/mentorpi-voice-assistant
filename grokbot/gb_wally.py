@@ -293,18 +293,12 @@ def handle(text, protections=None):
     raw = (text or "").strip()
     t = re.sub(r"\s+", " ", raw.lower()).strip(" .!?")
     woken = classify_wake(raw)
-    if woken and woken[0]:
-        import gb_maint
-        gb_maint.note_bench_wake(source="voice")
-    bench_off = maybe_release_bench(raw, source="voice")
     if woken == (False, ""):
         return None
     if woken and woken[0]:
         t = re.sub(r"\s+", " ", (woken[1] or "").lower()).strip(" .!?") or t
     t = re.sub(r"^(grok bot|grok|robot)[, ]+", "", t).strip()
     if fresh_john(raw):
-        if bench_off:
-            return "Bench hold is off. I am not moving and I am not repeating the last trip. " + NO_AUTH
         return NO_AUTH
     if re.search(r"\b(reboot|restart yourself|power off the pi|shut ?down the pi)\b", t):
         return "I don't reboot or shut down from a message. That stays on the Pi, with you there."

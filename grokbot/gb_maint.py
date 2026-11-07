@@ -103,6 +103,33 @@ def arm_bench(path, success=False, now=None):
     return True
 
 
+def release_own_deploy_hold(path, not_before=None):
+    """Remove only a deploy interlock this activation created. Does not arm a bench hold.
+
+    Leaves a fault, an unknown file, an older lock, and every ESTOP file alone.
+    """
+    if not path or os.path.basename(path) != NAME or not os.path.lexists(path):
+        return False
+    body = _read(path) or {}
+    if body.get("kind") != "maintenance" or body.get("src") != "maintenance":
+        return False
+    if "deploy interlock" not in str(body.get("why") or ""):
+        return False
+    if body.get("scope") in ("fault", "deployment-in-progress") or body.get("kind") == "fault":
+        return False
+    if not_before is not None:
+        try:
+            if float(body.get("t") or 0) + 2 < float(not_before):
+                return False
+        except (TypeError, ValueError):
+            return False
+    try:
+        os.remove(path)
+    except OSError:
+        return False
+    return True
+
+
 def note_bench_wake(now=None, source="voice"):
     """Remember a fresh spoken wake. A model or replayed source does not count."""
     if source != "voice":

@@ -166,6 +166,22 @@ def run_envelope(samples, sens="high", beat_s=None):
     return found, gate
 
 
+def latch_enabled(cfg, now=None):
+    """A test window never turns into a live latch when it expires or the process restarts.
+
+    latch:true is an explicit arm. A missing test_until means the running
+    service is allowed to latch. An expired test_until stays disarmed.
+    """
+    now = time.time() if now is None else float(now)
+    if not isinstance(cfg, dict):
+        return False
+    if cfg.get("latch") is True:
+        return True
+    if "test_until" in cfg:
+        return False
+    return True
+
+
 def inhibit_effect(maint_present, estop_present):
     """What the gate does while a lock file is held. No motor publish."""
     held = bool(maint_present or estop_present)

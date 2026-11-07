@@ -255,6 +255,49 @@ def drive_then_stop(text):
     if not pre or len(pre.split()) > 12 or _PRE_BLOCK.search(pre): return False
     return bool(_DRIVE_VERB.search(_PRE_FILLER.sub(" ", pre)))
 
+def _quoted_emergency(text):
+    return re.search(r'["“”][^"“”]{0,80}emergency\s+stop[^"“”]{0,80}["“”]', text or "", re.I) is not None
+
+
+def persistent_emergency(text):
+    """True only for a deliberate, unquoted, unnegated 'emergency stop'.
+
+    Normalization is case, spacing, and punctuation. It is not a fuzzy alias.
+    """
+    raw = text or ""
+    if _quoted_emergency(raw):
+        return False
+    t = _norm(raw)
+    if not t or re.search(r"\b(not|never|don'?t|do not|no)\b.{0,30}\bemergency stop\b", t):
+        return False
+    return re.search(r"\bemergency stop\b", t) is not None
+
+
+def plain_halt(text, moving=False):
+    """Immediate cancel. Does not by itself justify a persistent ESTOP file."""
+    if persistent_emergency(text) or _quoted_emergency(text):
+        return False
+    t = _norm(text)
+    if not t:
+        return False
+    if re.search(r"\b(not|never|don'?t|do not|no)\b.{0,24}\b(stop|halt|sit|hold up|freeze)\b", t):
+        return False
+    if t in ("stop", "halt", "sit", "hold up", "holdup", "freeze", "whoa", "abort"):
+        return True
+    if re.fullmatch(r"(?:please |ok |okay )?(?:stop|halt|sit|hold up|freeze|whoa|abort)(?: now| please)?", t):
+        return True
+    return kill_phrase(text, moving=moving)
+
+
+def stop_action(text, moving=False):
+    """'latch', 'halt', or None. Does not write a file or publish motion."""
+    if persistent_emergency(text):
+        return "latch"
+    if plain_halt(text, moving=moving):
+        return "halt"
+    return None
+
+
 def kill_phrase(text, moving=False):
     """True if this transcript must trigger the e-stop. Checked FIRST on every transcript (wake word or not, mid-TTS)."""
     t = _norm(text)
