@@ -1,4 +1,8 @@
 """Offline ESTOP auto-clear tests: temp ESTOP paths, mocked clock + one short real timeout. No audio, rosbridge or motors."""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
 import json, os, sys, tempfile, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gb_estop as g

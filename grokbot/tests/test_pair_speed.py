@@ -2,6 +2,10 @@
 
 A cloud timing number is not a pass on the Pi. The 0.5 s capture limit stays.
 """
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
 import json, os, sys, tempfile
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))

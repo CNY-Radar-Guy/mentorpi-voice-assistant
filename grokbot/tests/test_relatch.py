@@ -1,5 +1,9 @@
 """Offline re-latch self-voice filter tests (log 08:28:13 / 08:28:20): decision functions + AutoClear with a fake clock.
 No audio, no motors; temp ESTOP path only (the real data/ESTOP is never touched)."""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
 import json, os, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gb_estop as g

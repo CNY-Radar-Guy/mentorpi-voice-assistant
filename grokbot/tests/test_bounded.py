@@ -1,4 +1,8 @@
 """Bounded look through the gate. Replay only. A restart does not resume."""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
 import math, os, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gb_bounded

@@ -2,6 +2,10 @@
 
 No motors, no microphone, no tracks. Sensor samples are dicts.
 """
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
 import json, os, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)

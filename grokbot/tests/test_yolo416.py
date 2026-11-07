@@ -3,6 +3,10 @@
 Cloud timing is not a Pi measurement. Confidence is not rescaled.
 """
 import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
+import os, sys
 import cv2
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))

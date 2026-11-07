@@ -2,6 +2,10 @@
 
 sys.path is not edited. The files copied by gb_safety_run.sh have to import.
 """
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
 import os, re, shutil, subprocess, sys, textwrap, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)

@@ -3,6 +3,10 @@
 The depth checks use a missing scale file. A validated record on the Pi is not
 this case, and this file does not read it.
 """
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
 import json, os, struct, sys, tempfile, threading, time
 _iso = tempfile.mkdtemp(prefix="gblivefix_")
 os.environ["GB_DEPTH_SCALE_FILE"] = os.path.join(_iso, "missing-depth-scale.json")

@@ -181,8 +181,6 @@ for comp in rgbguard health; do
   fi
   echo "$comp is restarted on $REL. No other safety unit was restarted with it."
 done
-python3 -c "import sys; sys.path.insert(0,'$ROOT/grokbot'); import gb_maint
-for p in ('$DEST/data/MAINT', '/home/pi/docker/tmp/gb_safety/MAINT'):
-    print(p, 'removed own deploy hold' if gb_maint.release_own_deploy_hold(p, not_before=$HOLD_AT) else 'left unchanged')"
-echo "No bench hold was armed. gb-clap was not enabled. An existing ESTOP was not deleted. Port 8080 was not changed. Autonomy was not enabled."
+echo "MAINT was left in place on the host and the shared mount. This activation does not clear it."
+echo "gb-intent was not enabled. No bench hold was armed. gb-clap was not enabled. An existing ESTOP was not deleted. Port 8080 was not changed. Autonomy was not enabled. No twist was sent."
 exit 0

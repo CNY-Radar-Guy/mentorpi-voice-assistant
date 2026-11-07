@@ -1,3 +1,7 @@
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
 #!/usr/bin/env python3
 """test_reexplore.py - camera-primary fusion + explore recovery wiring (no motors).
 

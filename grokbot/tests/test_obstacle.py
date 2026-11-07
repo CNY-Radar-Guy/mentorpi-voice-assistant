@@ -1,3 +1,7 @@
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
 #!/usr/bin/env python3
 """test_obstacle.py - obstacle fusion (gb_obstacle) + wiring into gate / explore / features / rgbguard, 2026-11-05.
 Simulated LiDAR scans (ray-cast segments / circles), synthetic depth frames, encoder / IMU / RGB streams, a closed-loop

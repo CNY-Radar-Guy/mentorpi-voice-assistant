@@ -1,4 +1,8 @@
 """Mount, rollback, 8080, and activation decisions. No robot and no Docker."""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
 import json, os, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -160,6 +164,8 @@ check("snapshot topic is the confirmed one", "/ascamera/camera_publisher/rgb0/im
 # Follow uses health and a measured track. No track, no publisher call.
 now = time.time()
 health_path = os.path.join(tempfile.mkdtemp(prefix="wally_health_"), "health.json")
+os.environ["HEALTH_FILE"] = health_path
+os.environ["GB_HEALTH_FILE"] = health_path
 gb_health.SHARED = health_path
 with open(health_path, "w") as f:
     json.dump({"t": now, "mode": "lidar", "lidar_online": True, "lidar_valid_frac": 0.96,
@@ -168,7 +174,11 @@ gb_wally.set_autonomy(True)
 calls = []
 gb_wally.install_runtime(publisher=lambda cmd: calls.append(cmd))
 said = gb_wally.handle("follow me")
+import gb_paths
 check("follow without a person range does not publish", calls == [] and "measured distance" in (said or ""), said)
+check("follow demand is the test file, not the live Pi file",
+      gb_paths.demand_path() == os.environ["GB_DEMAND_FILE"]
+      and not gb_paths.demand_path().startswith("/home/pi/docker/tmp"), gb_paths.demand_path())
 track = os.path.join(tempfile.mkdtemp(prefix="wally_track_"), "person.json")
 with open(track, "w") as f:
     json.dump({"person": {"t": now, "depth_m": 3.2, "source": "lidar", "bearing": 0.0, "conf": 0.9}}, f)

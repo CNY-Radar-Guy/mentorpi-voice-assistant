@@ -780,13 +780,31 @@ def do_halt(why=""):
         log("zero halt failed:", ex)
     return "Stopped. I cancelled that motion and I did not latch the emergency lock. I am not continuing the old trip."
 
+def _recent_lines():
+    return [x for _t, x in PLAY_STATE.get("recent", [])]
+
+
 def respond_stop(text, why, moving=False):
-    action = gb_estop.stop_action(text, moving=moving)
+    action = gb_estop.stop_action(text, moving=moving, spoken_texts=_recent_lines())
     if action == "latch":
         return do_estop(why)
     if action == "halt":
         return do_halt(why)
     return None
+
+
+def consider_stop(text, why, moving=False):
+    """Run a real stop. Do not speak again for our own announcement or a second time inside 8 s."""
+    spoken = _recent_lines()
+    if gb_estop.announcement_echo(text, spoken) or gb_estop.future_stop(text):
+        log(f"ignored own announcement or a later stop condition: {text!r}")
+        return None
+    reply = respond_stop(text, why, moving=moving)
+    if not reply:
+        return None
+    if not gb_estop.claim_stop_speech():
+        return ""
+    return reply
 
 def do_resume():
     """Unlock clears a normal stop only. It does not resume a goal, a follow, or a mission."""
@@ -1579,17 +1597,22 @@ def stop_listener():
                                        initial_prompt="stop. halt. freeze. G-Bot stop.")
             tx = " ".join(sg.text.strip() for sg in segs).strip()
             if not tx: continue
+            if gb_estop.announcement_echo(tx, _recent_lines()) or gb_estop.future_stop(tx):
+                log(f"stop listener ignored own announcement or a later stop condition: {tx!r}")
+                continue
             echo = self_playing(0.5) or heard_over_playback(t_s - 3 * FRAME_MS / 1000.0)   # segment overlapped any playback (+0.5 s)
             dec = barge_decide(tx) if echo else None
-            if (dec["action"] == "kill") if echo else gb_estop.stop_action(tx, moving=True):
+            moving_now = _moving()
+            take = (dec["action"] == "kill") if echo else bool(gb_estop.stop_action(tx, moving=moving_now, spoken_texts=_recent_lines()))
+            if take:
                 if not gb_estop.is_set():
                     log(f"[ESTOP] barge-in kill phrase: {tx!r}")
-                    reply = respond_stop(tx, "voice (barge-in): " + tx, moving=True)
+                    reply = consider_stop(tx, "voice (barge-in): " + tx, moving=moving_now or echo)
                     if reply:
                         threading.Thread(target=speak, args=(reply,), daemon=True).start()
                 elif relatch_allowed(tx, t_a - 3 * FRAME_MS / 1000.0, "stop listener"):   # latched: re-latch only if not our own voice
                     log(f"[ESTOP] barge-in kill phrase while latched (re-latch): {tx!r}")
-                    respond_stop(tx, "voice (barge-in): " + tx, moving=True)
+                    consider_stop(tx, "voice (barge-in): " + tx, moving=True)
             elif dec and dec["action"] in ("drive", "latched"):   # drive command over our speech: cut TTS, run it
                 threading.Thread(target=_barge_run, args=(dec, "stop listener"), daemon=True).start()
             elif dec and dec["action"] == "resume":              # 'resume' over our speech while latched (echo-filtered)
@@ -1717,7 +1740,10 @@ def voice_loop():
                     dec = barge_decide(tx) if tx else None
                     if dec and dec["action"] == "kill":
                         if not gb_estop.is_set() or relatch_allowed(tx, mic.t_onset, "main mic, overlapped"):   # first latch: unfiltered
-                            log(f"[ESTOP] kill phrase during playback: {tx!r}"); speak(respond_stop(tx, "voice (during speech): " + tx, moving=True) or "")
+                            log(f"[ESTOP] kill phrase during playback: {tx!r}")
+                            reply = consider_stop(tx, "voice (during speech): " + tx, moving=True)
+                            if reply:
+                                speak(reply)
                     elif dec and dec["action"] in ("drive", "latched"):   # drive over our speech: no wake word needed
                         reply = barge_drive(dec, "main mic")
                         if reply:
@@ -1773,11 +1799,17 @@ def voice_loop():
             if not text:
                 continue
             # KILL SWITCH FIRST: every transcript, wake word or not, awake or not
-            if gb_estop.stop_action(text, moving=_moving()):
+            if gb_estop.announcement_echo(text, _recent_lines()) or gb_estop.future_stop(text):
+                log(f"ignored own announcement or a later stop condition: {text!r}")
+                continue
+            if gb_estop.stop_action(text, moving=_moving(), spoken_texts=_recent_lines()):
                 log(f"[ESTOP] stop heard (no wake word needed): {text!r}")
                 if gb_estop.is_set() and not relatch_allowed(text, mic.t_onset, "main mic"):   # first latch: unfiltered
                     continue
-                speak(respond_stop(text, "voice: " + text, moving=_moving()) or ""); awake_until = 0.0; continue
+                reply = consider_stop(text, "voice: " + text, moving=_moving())
+                if reply:
+                    speak(reply)
+                awake_until = 0.0; continue
             if gb_estop.is_set() and gb_estop.resume_phrase(text):
                 speak(do_resume()); continue
             try:

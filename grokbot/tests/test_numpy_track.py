@@ -3,6 +3,10 @@
 An empty detection cannot catch this: json.dump accepts plain floats and
 rejects numpy.float32. No camera, no drive, no invented range.
 """
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
 import json, os, sys, tempfile, time
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))

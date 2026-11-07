@@ -1,4 +1,8 @@
 """Versioned release and activation rollback. No robot and no systemd."""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
 import os, sys, tempfile
 _iso = tempfile.mkdtemp(prefix="gbrelease_")
 os.environ["GB_DEPTH_SCALE_FILE"] = os.path.join(_iso, "missing-depth-scale.json")

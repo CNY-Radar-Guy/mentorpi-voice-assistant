@@ -289,8 +289,64 @@ def plain_halt(text, moving=False):
     return kill_phrase(text, moving=moving)
 
 
-def stop_action(text, moving=False):
+def standalone_stop(text):
+    """A stop said by itself. A longer sentence that merely contains the word is not this."""
+    if persistent_emergency(text):
+        return True
+    t = _norm(text)
+    if not t:
+        return False
+    if t in ("stop", "halt", "sit", "hold up", "holdup", "freeze", "whoa", "woah", "abort",
+             "emergency stop", "e stop", "estop"):
+        return True
+    if re.fullmatch(r"(?:please |ok |okay )?(?:emergency stop|e ?stop|stop|halt|freeze|whoa|woah|abort)(?: now| please)?", t):
+        return True
+    return bool(_STRONG.match(t) and len(t.split()) <= 6)
+
+
+def future_stop(text):
+    """The word stop names a later condition. It is not a command to stop now."""
+    if standalone_stop(text) or persistent_emergency(text):
+        return False
+    t = _norm(text)
+    if drive_then_stop(t):
+        return False
+    return bool(re.search(r"\b(?:stop|halt|freeze)\b.{0,48}\b(?:when|if|after|until|once)\b"
+                          r"|\b(?:when|if|after|until|once)\b.{0,48}\b(?:stop|halt|freeze)\b", t))
+
+
+def announcement_echo(text, spoken_texts):
+    """A garbled hearing of our own halt or emergency sentence. A bare stop is never this."""
+    if standalone_stop(text):
+        return False
+    if own_line_echo(text, spoken_texts):
+        return True
+    spoken = " ".join(_norm(x if isinstance(x, str) else x[1]) for x in (spoken_texts or ()))
+    if not any(w in spoken for w in ("motion", "lock", "trip", "emergency", "latch", "cancel")):
+        return False
+    heard = set(_stem_words(text))
+    if not ({"stop", "halt", "emergency"} & heard):
+        return False
+    hit = heard & {"motion", "lock", "trip", "continuing", "continue", "latch", "cancel", "watch", "emergency"}
+    return len(hit) >= 2
+
+
+_STOP_SAID = {"t": 0.0}
+
+
+def claim_stop_speech(now=None, gap=8.0):
+    """One spoken halt acknowledgement. A repeat inside the gap still may stop; it does not speak again."""
+    now = time.time() if now is None else float(now)
+    if now - _STOP_SAID["t"] < float(gap):
+        return False
+    _STOP_SAID["t"] = now
+    return True
+
+
+def stop_action(text, moving=False, spoken_texts=()):
     """'latch', 'halt', or None. Does not write a file or publish motion."""
+    if announcement_echo(text, spoken_texts) or future_stop(text):
+        return None
     if persistent_emergency(text):
         return "latch"
     if plain_halt(text, moving=moving):
@@ -486,6 +542,8 @@ def bargein_decision(text, spoken_texts, speed_mult=1.0):
     # 2026-11-05 natural: strip lead-ins BEFORE the echo mask. Root cause of log 08:21:13: the robot had just said
     # "What do you need?", so the mask removed John's "you" and "I want you to drive forward for 10 seconds" became
     # "i want to drive forward ..." which parse_motion could not read -> ignored.
+    if announcement_echo(text, spoken_texts) or future_stop(text):
+        return {"action": "ignore", "left": "", "cmd": "", "motion": None}
     nat = strip_leadins(text) or _norm(text)
     left = strip_echo(nat, spoken_texts)
     keep = strip_echo(nat, spoken_texts, keep_structure=True)

@@ -3,6 +3,10 @@
 The files planted here are decoys. They are removed at the end. A path that
 already exists is left untouched.
 """
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sandbox
+sandbox.install()
 import glob, json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))

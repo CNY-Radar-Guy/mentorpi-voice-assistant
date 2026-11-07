@@ -1,0 +1,16 @@
+[Unit]
+Description=Partial intent observer (no velocity, does not clear MAINT)
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/grokbot
+ExecStart=/usr/bin/python3 /home/pi/grokbot/gb_intent_node.py
+Restart=on-failure
+# This unit is not enabled by wally_activate.sh.
+# Starting it must leave /home/pi/grokbot/data/MAINT and the container copy in place.
+# It publishes no twist. It is not a motor interlock.
+
+[Install]
+WantedBy=multi-user.target
