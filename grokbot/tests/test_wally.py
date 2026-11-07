@@ -326,7 +326,7 @@ env = "XAI_API_KEY=secret-keep\nWAKE_WORDS=okay wally,ok wally,wake up wally,yo 
 migrated, changed = migrate_text(env)
 check("wake migration changes the allowlist", changed)
 check("exact phrase replaces aliases", "WAKE_WORDS=wake up wally\n" in migrated and "okay wally" not in migrated)
-check("anywhere and fuzz are cleared", "WAKE_ANYWHERE=\n" in migrated and "WAKE_FUZZ=\n" in migrated)
+check("anywhere is cleared and fuzz is exact", "WAKE_ANYWHERE=\n" in migrated and "WAKE_FUZZ=1.0\n" in migrated)
 check("prompt is left alone", "WAKE_PROMPT=Wally.\n" in migrated)
 check("ack greeting and secret preserved", "WAKE_ACK=Hello John, are you ready to rock and roll?" in migrated and "STARTUP_GREETING=\n" in migrated and "XAI_API_KEY=secret-keep" in migrated)
 check("hardware event is not a wake", gb_wally.accept_hardware_event() is False)

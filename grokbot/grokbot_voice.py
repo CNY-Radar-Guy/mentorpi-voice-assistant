@@ -1300,8 +1300,19 @@ WAKE_ANYWHERE = set(_x.strip().lower() for _x in os.environ.get("WAKE_ANYWHERE",
 WAKE_ANYWHERE |= {"grokbot", "grockbot", "grogbot", "grocbot", "grokbots", "grockbots", "grokbott", "groqbot", "grokebot",
                   "gbots", "geebot", "jeebot", "rockbot", "grok", "groq"}
 WAKE_ANYWHERE.discard("wally")
-WAKE_TOKEN_FUZZ = float(E("WAKE_TOKEN_FUZZ", "0.80"))      # single word ~ "grokbot" (e.g. grogbot, grakbot)
-WAKE_FUZZ = float(E("WAKE_FUZZ", "0.78"))
+def _env_float(name, default):
+    """A blank or junk env value uses the default. It must not kill service import."""
+    raw = E(name, "")
+    text = str(raw).strip() if raw is not None else ""
+    if not text:
+        text = str(default)
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return float(default)
+
+WAKE_TOKEN_FUZZ = _env_float("WAKE_TOKEN_FUZZ", "0.80")      # single word ~ "grokbot" (e.g. grogbot, grakbot)
+WAKE_FUZZ = _env_float("WAKE_FUZZ", "1.0")                   # blank or unset is an exact match, not a crash
 HW_WAKE = E("HW_WAKE", "1") == "1"
 LOG_HEARD = E("LOG_HEARD", "1") == "1"
 WAKE_ACK = E("WAKE_ACK", "Hello John, are you ready to rock and roll?")

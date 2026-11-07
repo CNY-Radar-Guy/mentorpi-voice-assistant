@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Overwrite the software wake fields. Leave every other line alone.
 
-WAKE_WORDS becomes exactly "wake up wally". WAKE_ANYWHERE and WAKE_FUZZ are
-cleared so an alias or a similarity score cannot wake. WAKE_ACK, the startup
+WAKE_WORDS becomes exactly "wake up wally". WAKE_ANYWHERE is cleared.
+WAKE_FUZZ is set to 1.0, an exact match. A blank fuzz value crashes voice
+startup, so this migration does not write one. WAKE_ACK, the startup
 greeting, and the identity line are not rewritten. The WonderEcho chip is not
 mentioned here and is not reflashed.
 """
@@ -26,7 +27,7 @@ def migrate_text(text):
             continue
         key, val = m.group(1), m.group(2)
         nl = "\n" if line.endswith("\n") else ""
-        new = EXACT if key == "WAKE_WORDS" else ""
+        new = EXACT if key == "WAKE_WORDS" else ("1.0" if key == "WAKE_FUZZ" else "")
         if new != val:
             changed = True
         out.append(key + "=" + new + nl)

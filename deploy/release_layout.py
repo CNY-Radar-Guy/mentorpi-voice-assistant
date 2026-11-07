@@ -186,6 +186,11 @@ def voice_restart_env_ok(env_text):
         return False
     if vals.get("WAKE_ANYWHERE", "").strip():
         return False
-    if vals.get("WAKE_FUZZ", "").strip() not in ("", "0", "0.0"):
+    fuzz = vals.get("WAKE_FUZZ", "1.0").strip()
+    try:
+        fuzz_n = float(fuzz) if fuzz else 1.0
+    except ValueError:
+        return False
+    if fuzz_n != 1.0:
         return False
     return True

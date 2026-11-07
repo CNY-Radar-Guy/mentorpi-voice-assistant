@@ -85,12 +85,22 @@ live = "\n".join([
 text, changed = migrate_text(live)
 check("live alias list is rewritten", changed)
 check("only the exact phrase remains", "WAKE_WORDS=wake up wally\n" in text and "okay wally" not in text and "wallie" not in text.split("WAKE_ACK")[0])
-check("fuzz and anywhere are empty", "WAKE_FUZZ=\n" in text and "WAKE_ANYWHERE=\n" in text)
+check("fuzz is an exact match and anywhere is empty", "WAKE_FUZZ=1.0\n" in text and "WAKE_ANYWHERE=\n" in text)
 check("ack and greeting stay", "WAKE_ACK=Hello John, are you ready to rock and roll?" in text and "STARTUP_GREETING=\n" in text)
 for phrase in ("okay wally", "ok wally", "yo wally", "wallie", "wali", "hey wally"):
     check("alias does not wake: " + phrase, gb_wally.software_wake(phrase, hardware_event=True) is False)
 check("the spoken phrase still wakes", gb_wally.software_wake("wake up Wally") is True)
 check("the serial event alone does not", gb_wally.software_wake("", hardware_event=True) is False)
+import subprocess
+env = os.environ.copy()
+env["WAKE_FUZZ"] = ""
+env["WAKE_WORDS"] = "wake up wally"
+env["WAKE_ANYWHERE"] = ""
+env["PYTHONPATH"] = os.path.dirname(HERE)
+started = subprocess.run(
+    [sys.executable, "-c", "import grokbot_voice; raise SystemExit(0 if grokbot_voice.WAKE_FUZZ == 1.0 else 1)"],
+    cwd=os.path.dirname(HERE), env=env, capture_output=True, text=True)
+check("blank WAKE_FUZZ survives voice import", started.returncode == 0, (started.returncode, started.stderr[-400:]))
 
 # --- view demand dies with the viewers ---
 period = gb_demand.view_period(0.7)
