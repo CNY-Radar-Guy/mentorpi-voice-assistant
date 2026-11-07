@@ -1,5 +1,5 @@
 [Unit]
-Description=Grok Bot double-clap e-stop (always on, independent of grokbot and the network)
+Description=Grok Bot double-clap e-stop (disabled until a quiet-gate check; activation does not enable this)
 After=sound.target
 StartLimitIntervalSec=0
 

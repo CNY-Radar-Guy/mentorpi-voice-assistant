@@ -72,6 +72,16 @@ def estop(src="voice", why="", actions=None, kind=None):
                 wrote = True
         except Exception as ex:
             log("estop write failed", p, ex)
+    # A barge-in stop has to land on the host file and the container file.
+    # If one write did not create its file, copy the latch across once.
+    for src_path, dst_path in ((ESTOP, SHARED_ESTOP), (SHARED_ESTOP, ESTOP)):
+        if os.path.lexists(src_path) and not os.path.lexists(dst_path):
+            try:
+                if _write(dst_path, d):
+                    wrote = True
+                    log("mirrored stop", src_path, "->", dst_path)
+            except Exception as ex:
+                log("estop mirror failed", dst_path, ex)
     if not wrote:
         log("ESTOP safety latch kept")
         return False

@@ -176,5 +176,10 @@ for comp in rgbguard health; do
   fi
   echo "$comp is restarted on $REL. No other safety unit was restarted with it."
 done
-echo "The maintenance lock remains until deploy/maint_clear.sh. Port 8080 was not changed. Autonomy was not enabled."
+echo "The deploy interlock is still held. Arming it as a bench hold now that every unit above stayed up."
+python3 -c "import sys; sys.path.insert(0,'$ROOT/grokbot'); import gb_maint
+for p in ('$DEST/data/MAINT', '/home/pi/docker/tmp/gb_safety/MAINT'):
+    print(p, 'bench' if gb_maint.arm_bench(p, success=True) else 'left unchanged')"
+echo "A fresh wake plus I am John clears only that bench hold. It does not clear ESTOP, a clap stop, or a fault lock."
+echo "gb-clap was not enabled. Port 8080 was not changed. Autonomy was not enabled."
 exit 0

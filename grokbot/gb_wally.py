@@ -259,6 +259,32 @@ def _publish(cmd):
     return _publisher(cmd)
 
 
+def fresh_john(text):
+    """True for an unquoted, non-negated 'I am John' in this utterance. Not a credential."""
+    raw = text or ""
+    if re.search(r'["“”].{0,60}\b(i am|i\'m|im)\s+john\b.{0,60}["“”]', raw, re.I):
+        return False
+    low = re.sub(r"\s+", " ", raw.lower())
+    if re.search(r"\b(not|never|don'?t|do not|isn'?t)\b.{0,30}\bjohn\b", low):
+        return False
+    if re.search(r"\b(he|she|they|someone|model|gpt)\s+(said|says|claims)\b", low):
+        return False
+    return re.search(r"\b(i am|i'm|im|this is)\s+john\b", low) is not None
+
+
+def maybe_release_bench(text, now=None, source="voice", model=False, paths=None):
+    """Clear only an armed bench hold. A clap stop and a hard fault are not touched."""
+    import gb_maint
+    import gb_paths
+    if paths is None:
+        paths = [os.path.join(gb_paths.data_dir(), "MAINT"),
+                 os.path.join(os.path.dirname(gb_paths.shared_estop()), "MAINT")]
+    removed = gb_maint.release_bench(paths, fresh_john(text), now=now, source=source, model=model)
+    if removed:
+        drop_goals("bench-release")
+    return removed
+
+
 def handle(text, protections=None):
     """Return a spoken reply, or None to let the rest of the voice stack decide.
 
@@ -267,12 +293,18 @@ def handle(text, protections=None):
     raw = (text or "").strip()
     t = re.sub(r"\s+", " ", raw.lower()).strip(" .!?")
     woken = classify_wake(raw)
+    if woken and woken[0]:
+        import gb_maint
+        gb_maint.note_bench_wake(source="voice")
+    bench_off = maybe_release_bench(raw, source="voice")
     if woken == (False, ""):
         return None
     if woken and woken[0]:
         t = re.sub(r"\s+", " ", (woken[1] or "").lower()).strip(" .!?") or t
     t = re.sub(r"^(grok bot|grok|robot)[, ]+", "", t).strip()
-    if re.match(r"^(i am|i'm|im) john$", t) or t in ("i am john", "this is john"):
+    if fresh_john(raw):
+        if bench_off:
+            return "Bench hold is off. I am not moving and I am not repeating the last trip. " + NO_AUTH
         return NO_AUTH
     if re.search(r"\b(reboot|restart yourself|power off the pi|shut ?down the pi)\b", t):
         return "I don't reboot or shut down from a message. That stays on the Pi, with you there."

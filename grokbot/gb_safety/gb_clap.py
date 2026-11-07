@@ -15,11 +15,14 @@ Usage: gb_clap.py               (daemon)     gb_clap.py --wav f.wav [--sens high
 import json, math, os, subprocess, sys, time
 import numpy as np
 from scipy.signal import butter, sosfilt, sosfilt_zi
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import gb_clap_logic
+import gb_paths
 
-GB = "/home/pi/grokbot"
-CFG = os.path.join(GB, "data", "clap.json")
-ESTOP = os.path.join(GB, "data", "ESTOP")
-SHARED_ESTOP = "/home/pi/docker/tmp/gb_safety/ESTOP"
+GB = os.environ.get("GB_DIR") or "/home/pi/grokbot"
+CFG = os.path.join(gb_paths.data_dir(), "clap.json")
+ESTOP = gb_paths.host_estop()
+SHARED_ESTOP = gb_paths.shared_estop()
 ABORT = "/home/pi/docker/tmp/grokbot/explore/abort"
 LOGF = os.path.join(GB, "data", "clap.log")
 EVENT = os.path.join(GB, "data", "clap_event.json")
@@ -61,6 +64,7 @@ class Detector:
         self.sos_hi = butter(4, min(11000, sr * 0.45), "highpass", fs=sr, output="sos"); self.zi_hi = sosfilt_zi(self.sos_hi) * 0.0
         self.env_hi = []; self.rem_hi = np.zeros(0, dtype=np.float32); self.speaking = False; self.debug = None
         self.set_sens(sens)
+        self.gate = gb_clap_logic.QuietGate(self.sens_name if hasattr(self, "sens_name") else sens)
         self.env = []                                         # recent dB values (1 ms), ~2.2 s
         self.floor = -90.0; self.n = 0; self.rem = np.zeros(0, dtype=np.float32)
         self.pending = None                                   # onset awaiting decay confirmation
@@ -70,6 +74,7 @@ class Detector:
         self.rise, self.margin, self.sens_name = sens_params(sens)
         self.decay = max(8.0, self.rise * 0.7)
         self.abs_min = ABS_MIN.get(self.sens_name, -32.0 if not self.sens_name.endswith("dB") else -20.0 - self.margin)
+        self.gate = gb_clap_logic.QuietGate(self.sens_name if self.sens_name in gb_clap_logic.PRESETS else "high")
     def process(self, x):
         """x: float32 mono samples (-1..1). Returns list of double-clap events (dict)."""
         y, self.zi = sosfilt(self.sos, x, zi=self.zi)
@@ -84,7 +89,7 @@ class Detector:
         for v, vh in zip(db, dbh):
             self.env_hi.append(float(vh))
             if len(self.env_hi) > 64: self.env_hi.pop(0)
-            ev = self._step(float(v))
+            ev = self.gate.step(float(v))
             if ev: out.append(ev)
         return out
     def _step(self, v):
@@ -166,33 +171,10 @@ def fire(ev, test):
         log("TEST double clap (no latch):", json.dumps(ev))
         with open(EVENT + ".tmp", "w") as f: json.dump(ev, f)
         os.replace(EVENT + ".tmp", EVENT); return
-    d = {"t": time.time(), "ts": ev["ts"], "src": "clap", "why": "double clap gap=%sms rise=%s" % (ev["gap_ms"], ev["rise_db"])}
-    for p in (ESTOP, SHARED_ESTOP):
-        try:
-            os.makedirs(os.path.dirname(p), exist_ok=True)
-            with open(p, "w") as f: json.dump(d, f)
-        except Exception as ex: log("estop write failed", p, ex)
-    try:
-        os.makedirs(os.path.dirname(ABORT), exist_ok=True); open(ABORT, "w").write("ESTOP clap")
-    except Exception: pass
-    log("DOUBLE CLAP -> ESTOP LATCHED", json.dumps(ev))
+    result = gb_clap_logic.latch_clap(ESTOP, SHARED_ESTOP, os.path.join(gb_paths.data_dir(), "MAINT"), ABORT)
+    log("DOUBLE CLAP -> ESTOP file", json.dumps(ev), "motion", result["motion"])
     with open(EVENT + ".tmp", "w") as f: json.dump(ev, f)
     os.replace(EVENT + ".tmp", EVENT)
-    try:                                                     # zero via rosbridge (best effort; gate+watchdog act on the file)
-        if "/home/pi/grokbot/venv/lib/python3.11/site-packages" not in sys.path:
-            sys.path.append("/home/pi/grokbot/venv/lib/python3.11/site-packages")
-        import websocket
-        ws = websocket.create_connection("ws://127.0.0.1:9090", timeout=1.5)
-        z = {"linear": {"x": 0.0, "y": 0.0, "z": 0.0}, "angular": {"x": 0.0, "y": 0.0, "z": 0.0}}
-        ws.send(json.dumps({"op": "advertise", "topic": "/gb/motion_req", "type": "std_msgs/String"}))
-        ws.send(json.dumps({"op": "advertise", "topic": "/controller/cmd_vel", "type": "geometry_msgs/Twist"}))
-        time.sleep(0.2)
-        for _ in range(5):
-            ws.send(json.dumps({"op": "publish", "topic": "/gb/motion_req", "msg": {"data": json.dumps({"op": "stop", "src": "clap"})}}))
-            ws.send(json.dumps({"op": "publish", "topic": "/controller/cmd_vel", "msg": z})); time.sleep(0.05)
-        ws.close()
-    except Exception as ex:
-        log("rosbridge zero skipped:", ex)
     try:
         if subprocess.run(["systemctl", "is-active", "--quiet", "grokbot"]).returncode != 0 and os.path.exists(WAV):
             subprocess.run(["aplay", "-q", "-D", os.environ.get("CLAP_OUT", "plughw:CARD=Device,DEV=0"), WAV], timeout=5)
