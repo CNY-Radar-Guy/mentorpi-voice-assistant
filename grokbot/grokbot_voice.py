@@ -241,10 +241,11 @@ class Mic:
         if self.p:
             self.p.terminate(); self.p.wait(); self.p = None
     def frame(self):
-        data = self.p.stdout.read(FRAME_BYTES)
-        if not data or len(data) < FRAME_BYTES:
+        import gb_wally
+        try:
+            return gb_wally.read_pcm_frame(self.p.stdout.read, FRAME_BYTES)
+        except IOError:
             raise IOError("arecord stopped (device busy? see `fuser -v /dev/snd/*`)")
-        return data
     def calibrate(self, seconds=0.6):
         vals = [rms(self.frame()) for _ in range(int(seconds * 1000 / FRAME_MS))]
         self.noise = max(50.0, float(np.median(vals)))
@@ -1756,6 +1757,17 @@ def voice_loop():
                 pass
             awake = t_listen < awake_until   # a serial Hello Hiwonder event does not open this window
             matched, rest = match_wake(text) if text else (False, "")
+            if text and not matched:
+                import gb_wally
+                if gb_wally.wake_prefix(text):
+                    more = mic.record_utterance(wait_s=1.5)
+                    more_text = ""
+                    if more and len(more) >= RATE * 2 * 0.2:
+                        more_text = (stt(pcm_to_wav(more), prompt=prompt, idle=True) or "").strip()
+                    joined = gb_wally.join_wake_text(text, more_text)
+                    log(f"wake prefix {text!r} plus {more_text!r}")
+                    text = joined
+                    matched, rest = match_wake(text) if text else (False, "")
             log_heard(text, matched, "awake" if awake else "idle", time.time() - t0)
             log(f"heard: {text!r} wake={matched} awake={awake}")
             if not text:

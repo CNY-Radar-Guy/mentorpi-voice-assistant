@@ -23,6 +23,47 @@ def accept_hardware_event():
     return False
 
 
+def wake_tokens(text):
+    raw = [w for w in re.split(r"[\s,]+", (text or "").replace("-", " ")) if w]
+    norms = []
+    for w in raw:
+        n = re.sub(r"[^a-z0-9]+", "", w.lower())
+        if n:
+            norms.append(n)
+    return norms
+
+
+def wake_prefix(text):
+    """A cut-off start of the exact phrase. Not a wake by itself."""
+    norms = wake_tokens(text)
+    if not norms or tuple(norms) == EXACT_WAKE:
+        return False
+    return len(norms) < len(EXACT_WAKE) and tuple(norms) == EXACT_WAKE[:len(norms)]
+
+
+def join_wake_text(first, second):
+    return ((first or "").strip() + " " + (second or "").strip()).strip()
+
+
+def read_pcm_frame(read, nbytes, max_interruptions=8):
+    """One full PCM frame. A short read or an interrupted system call is not the end."""
+    buf = bytearray()
+    interruptions = 0
+    while len(buf) < int(nbytes):
+        try:
+            chunk = read(int(nbytes) - len(buf))
+        except InterruptedError:
+            interruptions += 1
+            if interruptions > int(max_interruptions):
+                raise
+            continue
+        if not chunk:
+            raise IOError("arecord ended")
+        buf.extend(chunk)
+        interruptions = 0
+    return bytes(buf)
+
+
 def software_wake(text, hardware_event=False):
     """True only for the spoken phrase. A serial wake event does not count."""
     if hardware_event and not accept_hardware_event():
@@ -446,6 +487,9 @@ def handle(text, protections=None):
     taught = teacher().hear(t, _default_capture)
     if taught:
         return taught
+    if re.search(r"\b(explore|look around|map this room|come home|go home|return home)\b", t):
+        return ("I can't explore or go home yet. Nav2, SLAM, and a home position are not running, "
+                "and the saved map is not in use. I have not moved.")
     if re.search(r"\b(look for a person|acquire|find a person)\b", t):
         _follow_demand_mode("acquire")
         return "I am looking for a person. Autonomy is unchanged and I am not moving."
@@ -473,8 +517,14 @@ def handle(text, protections=None):
         fl = follow_loop()
         now = time.time()
         if not _autonomy:
-            _follow_demand(False)
-            return "Autonomy is off. I will not follow, and I did not send a drive."
+            missing = autonomy_blockers(gb_health.read_shared(), track, controller_heartbeat(), time.time())
+            if protections.get("estop"):
+                missing.append("the emergency stop to be cleared")
+            if missing:
+                _follow_demand(True)
+                return ("I have not moved. I still need " + ", ".join(missing)
+                        + ". The camera stays on. Say follow me again when that is true.")
+            set_autonomy(True)
         fl.start(now)
         cmd = fl.step(now, gb_health.read_shared(now=now), track, _autonomy, protections, maint=False)
         _follow_demand(bool(fl.active))

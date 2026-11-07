@@ -175,6 +175,10 @@ for comp in rgbguard health; do
     echo "$comp did not stay on $REL. Gate and watchdog were left on that release. ESTOP and the maintenance lock were not removed."
     exit 5
   fi
+  if [ "$comp" = "health" ]; then
+    sudo systemctl enable gb-health
+    echo "gb-health is enabled for the next boot."
+  fi
   echo "$comp is restarted on $REL. No other safety unit was restarted with it."
 done
 python3 -c "import sys; sys.path.insert(0,'$ROOT/grokbot'); import gb_maint

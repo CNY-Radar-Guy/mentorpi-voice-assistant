@@ -10,6 +10,7 @@ import json, os, time
 MODES = ("follow", "point", "view", "acquire")
 VIEW_TTL = 2.0
 ACQUIRE_TTL = 20.0
+FOLLOW_TTL = 120.0
 VIEW_DUTY = 0.12
 
 
@@ -64,7 +65,7 @@ def read_demand(path, now=None, ttl=None):
     except (OSError, ValueError, KeyError, TypeError):
         return None
     if ttl is None:
-        ttl = VIEW_TTL if mode == "view" else (ACQUIRE_TTL if mode == "acquire" else 30.0)
+        ttl = VIEW_TTL if mode == "view" else (ACQUIRE_TTL if mode == "acquire" else (FOLLOW_TTL if mode == "follow" else 30.0))
     if age < 0 or age > float(ttl) or mode not in MODES:
         return None
     return mode
