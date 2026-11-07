@@ -333,24 +333,21 @@ check("hardware event is not a wake", gb_wally.accept_hardware_event() is False)
 check("okay wally does not wake", gb_wally.software_wake("okay wally", hardware_event=True) is False)
 check("wallie does not wake", gb_wally.classify_wake("wallie") == (False, ""))
 
-def _span(work, n=30):
-    gaps = []
-    t = time.perf_counter()
+def _work(work, n=40):
+    """Median time inside the call. The sleep that pads a control tick is not included.
+    This is not the 0.5 s capture-age limit."""
+    samples = []
     for _ in range(n):
-        target = t + 0.005
+        t = time.perf_counter()
         work()
-        gaps.append(time.perf_counter() - t)
-        wait = target - time.perf_counter()
-        if wait > 0:
-            time.sleep(wait)
-        t = target
-    gaps.sort()
-    return gaps[len(gaps) // 2]
-base = _span(lambda: None)
-pushed = _span(lambda: slot.offer(time.time(), frame))
-heavy = _span(lambda: gb_stream.draw_box(frame, (0, 0, 10, 8)))
-print("control-loop median seconds (simulation, not the Pi): idle %.6f push %.6f draw %.6f" % (base, pushed, heavy))
-check("pushing a frame stays cheaper than drawing on the control loop", pushed < heavy, (base, pushed, heavy))
+        samples.append(time.perf_counter() - t)
+    samples.sort()
+    return samples[len(samples) // 2]
+base = _work(lambda: None)
+pushed = _work(lambda: slot.offer(time.time(), frame))
+heavy = _work(lambda: gb_stream.draw_box(frame, (0, 0, 10, 8)))
+print("control-loop work seconds (not capture age, not the Pi): idle %.6f push %.6f draw %.6f" % (base, pushed, heavy))
+check("pushing a frame stays cheaper than drawing, work time only", pushed < heavy, (base, pushed, heavy))
 
 print("test_wally: %d passed, %d failed" % (OK, BAD))
 sys.exit(0 if BAD == 0 else 1)

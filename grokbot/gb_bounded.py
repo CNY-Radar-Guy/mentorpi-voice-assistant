@@ -53,13 +53,18 @@ class BoundedLook(object):
         self.reason = None
         return self
 
-    def begin(self, now, odom):
+    def begin(self, now, odom, cap_s=None):
         self.requested = True
         self.active = True
         self.t0 = float(now)
         self.home = (float(odom[0]), float(odom[1]), float(odom[2]))
         self.phase = "out"
         self.reason = None
+        try:
+            cap = CAP_S if cap_s is None else float(cap_s)
+        except (TypeError, ValueError):
+            cap = CAP_S
+        self.cap = max(5.0, min(90.0, cap))
         return self
 
     def cancel(self, why):
@@ -82,7 +87,7 @@ class BoundedLook(object):
         except (TypeError, ValueError):
             return self.cancel("sensors_stale")
         now = float(now)
-        if self.phase == "out" and now - self.t0 >= CAP_S:
+        if self.phase == "out" and now - self.t0 >= getattr(self, "cap", CAP_S):
             self.phase = "return"
         if self.phase == "return":
             return self._return(odom)

@@ -506,8 +506,19 @@ def handle(text, protections=None):
     if re.search(r"\b(explore|look around|map this room|come home|go home|return home)\b", t):
         import gb_bounded
         bounded_look().request()
-        return ("I have not moved. A short look can run through the gate once odometry and the laser are fresh, "
-                "then return to that odometry pose. Nav2 is not running, and a restart will not resume it.")
+        sent = False
+        if _runtime and _publisher is not None:
+            try:
+                _publish({"op": "bounded", "cap": gb_bounded.CAP_S, "src": "voice"})
+                sent = True
+            except Exception:
+                sent = False
+        if sent:
+            return ("I asked the gate for a short look. It drives only while the laser and odometry are fresh, "
+                    "stops at the existing obstacle limits, and returns to the pose where it started. "
+                    "Nav2 is not running. A restart will not resume it. I have not seen the wheels move.")
+        return ("I have not moved. A short look runs through the gate once odometry and the laser are fresh, "
+                "then returns to that odometry pose. Nav2 is not running, and a restart will not resume it.")
     if re.search(r"\b(look for a person|acquire|find a person)\b", t):
         _follow_demand_mode("acquire")
         return "I am looking for a person. Autonomy is unchanged and I am not moving."

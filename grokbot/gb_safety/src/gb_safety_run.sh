@@ -63,6 +63,7 @@ cp -f "$TREE/gb_demand.py" "$CODE/gb_demand.py" 2>/dev/null || true
 cp -f "$TREE/gb_hands.py" "$CODE/gb_hands.py" 2>/dev/null || true
 cp -f "$TREE/gb_nav.py" "$CODE/gb_nav.py" 2>/dev/null || true
 cp -f "$TREE/gb_paths.py" "$CODE/gb_paths.py"
+cp -f "$TREE/gb_bounded.py" "$CODE/gb_bounded.py"
 cp -f "$TREE/gb_yolo.py" "$CODE/gb_yolo.py" 2>/dev/null || true
 NICE=""
 if [ "$WHAT" = rgbguard ]; then

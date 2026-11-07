@@ -23,6 +23,7 @@ check("the launcher copies gb_paths into the release directory", "gb_paths.py" i
 check("the launcher copies the release ONNX, not only the old host model",
       "gb_safety/yolov8n.onnx" in copied)
 check("the launcher copies the shared decoder", "gb_yolo.py" in copied)
+check("the launcher copies the bounded look", "gb_bounded.py" in copied)
 
 code = tempfile.mkdtemp(prefix="gbrelease_")
 for rel in copied:
@@ -33,24 +34,33 @@ for rel in copied:
     shutil.copy2(src, dst)
 # The node itself is gb_safety/gb_$WHAT.py. Copy the tracker the unit starts.
 shutil.copy2(os.path.join(ROOT, "gb_safety", "gb_rgbguard.py"), os.path.join(code, "gb_rgbguard.py"))
+iso = tempfile.mkdtemp(prefix="gbiso_")
+missing = os.path.join(iso, "missing-scale.json")
 runner = os.path.join(code, "layout_check.py")
 open(runner, "w").write(textwrap.dedent("""\
     import gb_metric
     import gb_paths
+    print("import-ok", gb_paths.__file__)
     status = gb_metric.depth_scale_status()
     empty = gb_metric.sighting_record(1.0, [])
     person = gb_metric.sighting_record(1.0, [{"conf": 0.81, "box": [268, 1, 384, 270]}])
     assert status["reason"] == "no_scale_record", status
+    assert status["path"].endswith("missing-scale.json"), status
     assert empty["reason"] == "no_person", empty
     assert person["person"]["conf"] == 0.81 and "depth_m" not in person["person"]
     print("layout-ok")
 """))
 env = os.environ.copy()
 env.pop("PYTHONPATH", None)
-env.pop("GB_DEPTH_SCALE_FILE", None)
+env["GB_DEPTH_SCALE_FILE"] = missing
+env["HEALTH_FILE"] = os.path.join(iso, "health.json")
+env["GB_SHARED_DIR"] = iso
 proc = subprocess.run([sys.executable, runner], cwd="/tmp", env=env, capture_output=True, text=True)
-check("imports succeed from the release directory with cwd /tmp",
-      proc.returncode == 0 and "layout-ok" in proc.stdout, proc.stderr[-400:] + proc.stdout[-200:])
+check("the release directory imports with cwd /tmp and no PYTHONPATH",
+      proc.returncode == 0 and "import-ok" in proc.stdout and code in proc.stdout,
+      proc.stderr[-500:] + proc.stdout[-300:])
+check("an empty fixture is not the live scale record",
+      proc.returncode == 0 and "layout-ok" in proc.stdout, proc.stdout[-300:])
 
 # The regression: without gb_paths the same command fails.
 bare = tempfile.mkdtemp(prefix="gbbare_")
