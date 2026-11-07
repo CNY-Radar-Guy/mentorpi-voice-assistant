@@ -1,25 +1,20 @@
-"""Controller launch with the motor subscription moved behind admission.
+"""Not a safety boundary. Do not launch this file.
 
-The vendor node subscribes to ~/set_motor. This file remaps that name to
-/gb/set_motor_admitted. gb-actuation must be running or the board receives
-nothing. Direct serial writes are not remapped. Do not use this file to
-clear MAINT or to stop the watchdog.
+The earlier draft remapped ~/set_motor to only /gb/set_motor_admitted.
+That drops the watchdog's direct zero on /ros_robot_controller/set_motor,
+and any ROS node can publish the admitted topic. GB_CONTROLLER_REMAPPED
+is not proof that a callback checked anything.
+
+A later supervised controller change has to keep the raw subscription for
+zeros and recheck admitted commands inside set_motor_state. This file
+raises instead of installing the unsafe remap.
 """
-from launch_ros.actions import Node
-from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+UNSAFE_REMAP = ("set_motor", "/gb/set_motor_admitted")
+RAW_ZERO_TOPIC = "/ros_robot_controller/set_motor"
 
 
 def generate_launch_description():
-    imu_frame = LaunchConfiguration("imu_frame", default="imu_link")
-    return LaunchDescription([
-        DeclareLaunchArgument("imu_frame", default_value=imu_frame),
-        Node(
-            package="ros_robot_controller",
-            executable="ros_robot_controller",
-            output="screen",
-            parameters=[{"imu_frame": imu_frame}],
-            remappings=[("set_motor", "/gb/set_motor_admitted")],
-        ),
-    ])
+    raise RuntimeError(
+        "refusing to remap set_motor onto /gb/set_motor_admitted; "
+        "that drops watchdog zeros and any node can publish the public topic"
+    )

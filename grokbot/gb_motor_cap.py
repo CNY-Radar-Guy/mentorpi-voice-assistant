@@ -42,6 +42,49 @@ def half_rps():
     return peak_rps() / 2.0
 
 
+def tank_rps_map(lin, ang, linear_y=0.0):
+    """Per-motor rps from the installed tank call.
+
+    odom_publisher builds MecanumChassis(0.1368, 0.1446, 0.075) and, for
+    MentorPi_Tank, calls set_velocity(linear_x, 0, angular_z). mecanum.py
+    then stores [-m1, -m2, m3, m4] with m1 = vx - vy - w*span. The tank
+    odometry factor 0.52 is applied to the pose integral, not to these rps.
+    A left/right correction that rewrites a straight command is not applied
+    here; motors that differ from this map are rejected.
+    """
+    span = _span()
+    vx = float(lin)
+    vy = float(linear_y)
+    w = float(ang)
+    motor1 = vx - vy - w * span
+    motor2 = vx + vy - w * span
+    motor3 = vx + vy + w * span
+    motor4 = vx - vy + w * span
+    raw = (-motor1, -motor2, motor3, motor4)
+    return [(i + 1, mps_to_rps(v)) for i, v in enumerate(raw)]
+
+
+def motors_match_twist(pairs, lin, ang, tol=1e-4):
+    """True when the four rps values are the tank map of this twist."""
+    try:
+        expected = {mid: rps for mid, rps in tank_rps_map(lin, ang)}
+    except (TypeError, ValueError):
+        return False
+    got = {}
+    for item in pairs or ():
+        try:
+            mid = int(item[0])
+            rps = float(item[1])
+        except (TypeError, ValueError, IndexError):
+            return False
+        if mid in got or rps != rps or math.isinf(rps):
+            return False
+        got[mid] = rps
+    if set(got) != set(expected):
+        return False
+    return all(abs(got[i] - expected[i]) <= tol for i in expected)
+
+
 def clamp_motors(pairs):
     """[(id, rps), ...] clamped to ±half_rps, or None if the list is unusable."""
     if not isinstance(pairs, (list, tuple)) or not pairs:

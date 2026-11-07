@@ -51,7 +51,23 @@ def live_module_untouched(dest_root, name="grokbot_voice.py"):
 
 
 def dropin_text(component, release_root):
-    """systemd drop-in. Voice is the release tree; gate and watchdog are its launcher."""
+    """systemd drop-in. Voice is the release tree; gate and watchdog are its launcher.
+
+    Actuation is not in ORDER. A normal activation does not switch it on.
+    """
+    if component == "actuation":
+        script = os.path.join(release_root, "gb_safety", "gb_safety_run.sh")
+        return (
+            "[Service]\n"
+            "Environment=GB_TREE=%s\n"
+            "Environment=GB_RELEASE=%s\n"
+            "Environment=GB_MAINT_FILE=/home/ubuntu/shared/gb_safety/MAINT\n"
+            "Environment=GB_LEASE_FILE=/home/ubuntu/shared/gb_safety/lease.json\n"
+            "Environment=GB_GATE_ENVELOPE=/home/ubuntu/shared/gb_safety/gate_envelope.json\n"
+            "ExecStart=\n"
+            "ExecStart=/bin/bash %s actuation\n" % (
+                release_root, os.path.basename(release_root.rstrip("/")), script)
+        )
     if component == "voice":
         script = os.path.join(release_root, "grokbot_voice.py")
         return (

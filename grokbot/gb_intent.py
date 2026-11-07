@@ -63,7 +63,213 @@ def open_lease(text, now, cap_s=45.0):
         "approved": False,
         "interlock": False,
         "all_writer_pause": False,
+        "source": "voice",
+        "action": "bounded_look",
+        "revoked": False,
     }
+
+
+_BOOK = {"lease": None}
+
+
+def lease_path():
+    explicit = os.environ.get("GB_LEASE_FILE")
+    if explicit:
+        return os.path.expanduser(explicit)
+    import gb_paths
+    return os.path.join(gb_paths.shared_dir(), "lease.json")
+
+
+def envelope_path():
+    explicit = os.environ.get("GB_GATE_ENVELOPE")
+    if explicit:
+        return os.path.expanduser(explicit)
+    import gb_paths
+    return os.path.join(gb_paths.shared_dir(), "gate_envelope.json")
+
+
+def _atomic(path, body):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(body, f)
+    os.replace(tmp, path)
+    return path
+
+
+def write_lease(lease, path=None):
+    return _atomic(path or lease_path(), dict(lease))
+
+
+def read_lease(path=None):
+    path = path or lease_path()
+    try:
+        with open(path) as f:
+            body = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(body, dict) or not body.get("id"):
+        return None
+    return body
+
+
+def write_envelope(intent_id, lin, ang, now, path=None):
+    """The gate's current twist. A raw motor list cannot invent this."""
+    return _atomic(path or envelope_path(), {
+        "intent_id": intent_id,
+        "lin": float(lin),
+        "ang": float(ang),
+        "mono": float(now),
+        "source": "gate",
+        "action": "bounded_look",
+        "cleared": False,
+    })
+
+
+def clear_envelope(now, why, path=None):
+    return _atomic(path or envelope_path(), {
+        "cleared": True,
+        "mono": float(now),
+        "why": why,
+        "source": "gate",
+    })
+
+
+def read_envelope(now, path=None, fresh_s=0.5):
+    path = path or envelope_path()
+    try:
+        with open(path) as f:
+            body = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(body, dict) or body.get("cleared"):
+        return None
+    try:
+        age = float(now) - float(body.get("mono"))
+        lin = float(body.get("lin"))
+        ang = float(body.get("ang"))
+    except (TypeError, ValueError):
+        return None
+    if age < 0 or age > float(fresh_s):
+        return None
+    if body.get("source") != "gate" or body.get("action") != "bounded_look" or not body.get("intent_id"):
+        return None
+    body["lin"] = lin
+    body["ang"] = ang
+    return body
+
+
+def claim_from(lease, envelope, now):
+    """Voice lease plus a fresh gate twist. An explore lease alone is not a claim."""
+    if not lease or lease.get("revoked") or not envelope:
+        return None
+    if envelope.get("intent_id") != lease.get("id"):
+        return None
+    if lease.get("source") != "voice" or lease.get("action") != "bounded_look":
+        return None
+    try:
+        deadline = float(lease.get("mono_deadline", lease.get("deadline")))
+        if float(now) > deadline:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return {
+        "lease_id": lease["id"],
+        "source": "voice",
+        "action": "bounded_look",
+        "lin": envelope["lin"],
+        "ang": envelope["ang"],
+    }
+
+
+def issue_lease(text, now, cap_s=45.0):
+    """One monotonic deadline. A second request before it ends does not move it.
+
+    `now` is the caller's clock. Voice and the container node pass time.monotonic()
+    so a wall-clock step cannot extend the lease. The same number is not comparable
+    across hosts that do not share CLOCK_MONOTONIC.
+    """
+    now = float(now)
+    cur = _BOOK["lease"]
+    if cur and not cur.get("revoked"):
+        try:
+            deadline = float(cur.get("mono_deadline", cur.get("deadline")))
+            if now <= deadline:
+                return cur
+        except (TypeError, ValueError):
+            pass
+    lease = open_lease(text, now, cap_s)
+    lease["mono"] = now
+    lease["mono_deadline"] = now + float(lease["cap_s"])
+    lease["deadline"] = lease["mono_deadline"]
+    _BOOK["lease"] = lease
+    try:
+        write_lease(lease)
+    except OSError:
+        pass
+    return lease
+
+
+def active_lease():
+    return _BOOK["lease"]
+
+
+def revoke_active(now, why):
+    """Stop cancels the lease. The deadline can move earlier and never later."""
+    cur = _BOOK["lease"]
+    if not cur:
+        return None
+    now = float(now)
+    try:
+        cur["deadline"] = min(float(cur["deadline"]), now)
+    except (TypeError, ValueError):
+        cur["deadline"] = now
+    cur["revoked"] = True
+    cur["revoke_why"] = why
+    cur["mono_deadline"] = cur["deadline"]
+    try:
+        write_lease(cur)
+        clear_envelope(now, why)
+    except OSError:
+        pass
+    return cur
+
+
+def propose_repair(explanation):
+    return {
+        "id": "repair-%d" % int(time.time() * 1000),
+        "explanation": explanation,
+        "state": "proposed",
+        "approved": False,
+        "applied": False,
+        "approver": None,
+        "retest": None,
+        "interlock": False,
+    }
+
+
+def accept_repair(record, approver):
+    """A named person accepts the proposal. Nothing is applied and nothing moves."""
+    if not record or not approver or str(approver).strip().lower() == "auto":
+        return None
+    out = dict(record)
+    out["approved"] = True
+    out["approver"] = str(approver)
+    out["state"] = "approved"
+    out["applied"] = False
+    return out
+
+
+def record_retest(record, passed, supervisor):
+    """Supervised result after approval. Still not an automatic patch."""
+    if not record or not record.get("approved") or not supervisor or str(supervisor).strip().lower() == "auto":
+        return None
+    out = dict(record)
+    out["retest"] = "passed" if passed else "failed"
+    out["state"] = "retest_passed" if passed else "retest_failed"
+    out["supervisor"] = str(supervisor)
+    out["applied"] = False
+    return out
 
 
 def pending_condition(text, now):

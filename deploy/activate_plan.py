@@ -76,6 +76,7 @@ PLAN = (
     "A voice reload is separate and only when SUPPRESS_STARTUP_SPEECH=1 and ESTOP_AUTOCLEAR_S=0. Empty STARTUP_GREETING is not that switch. The reload must not clear ESTOP or MAINT.",
     "The maintenance lock stays until an explicit post-check clear. Resume, a drive command, and the old 15 second timer do not clear it.",
     "Do not start a follow, do not play a readiness phrase, and do not move web_video_server. Port 8080 stays unmet.",
+    "Do not start gb-actuation and do not restart ros_robot_controller. That link interruption is a separate supervised step. Do not remap set_motor off the watchdog.",
 )
 
 

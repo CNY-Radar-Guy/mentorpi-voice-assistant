@@ -182,5 +182,7 @@ for comp in rgbguard health; do
   echo "$comp is restarted on $REL. No other safety unit was restarted with it."
 done
 echo "MAINT was left in place on the host and the shared mount. This activation does not clear it."
+echo "gb-actuation was not started. The controller was not restarted and its set_motor subscription was not remapped."
+echo "A controller restart interrupts the motor link and stays a supervised step. MAINT was not removed."
 echo "gb-intent was not enabled. No bench hold was armed. gb-clap was not enabled. An existing ESTOP was not deleted. Port 8080 was not changed. Autonomy was not enabled. No twist was sent."
 exit 0

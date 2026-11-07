@@ -97,7 +97,7 @@ class Gate(Node):
         self.mode = "idle"; self.lin = 0.0; self.ang = 0.0; self.src = ""; self.rid = ""
         self.deadline = 0.0; self.t_start = 0.0; self.t_fresh = 0.0; self.zero_until = 0.0; self.last_zero = 0.0
         self.turn = None; self.yaw = None; self.yaw_src = None; self.yaw_t = 0.0
-        self.ox = 0.0; self.oy = 0.0; self.look = None; self.poses = {}
+        self.ox = 0.0; self.oy = 0.0; self.look = None; self.lease_id = ""; self.poses = {}
         self.estop = os.path.exists(ESTOP); self.maint = os.path.exists(MAINT); self.last_why = "start"; self.n_out = 0; self.last_pub = (None, None)
         import collections; self.seen = collections.deque(maxlen=256)
         self.joy = {"present": False, "lin": 0.0, "ang": 0.0, "t": 0.0}
@@ -280,6 +280,11 @@ class Gate(Node):
                 self.log("bounded return requested id=%s" % rid)
             elif op == "bounded":
                 import gb_bounded
+                intent = str(d.get("intent_id") or d.get("id") or "")
+                if not intent:
+                    self.log("REFUSED bounded id=%s: no lease id" % rid); return
+                if self.mode == "bounded" and self.lease_id and intent == self.lease_id:
+                    self.log("bounded lease already running id=%s; deadline not extended" % intent); return
                 pinned = self._pinned_odom(now)
                 if pinned is None or not gb_bounded.fresh_age(now - self.scan_t, gb_bounded.SCAN_FRESH_S):
                     self.log("REFUSED bounded id=%s: pinned /odom or scan not fresh" % rid); return
@@ -293,7 +298,7 @@ class Gate(Node):
                 if not self.look.active:
                     self.look = None
                     self.log("REFUSED bounded id=%s: %s" % (rid, "source")); return
-                self.mode = "bounded"; self.src = src; self.rid = rid; self.t_start = now
+                self.mode = "bounded"; self.src = src; self.rid = rid; self.lease_id = intent; self.t_start = now
                 self.deadline = now + self.look.cap; self.lin = 0.0; self.ang = 0.0; self.turn = None
                 self.log("START bounded id=%s src=%s cap=%.0fs source=/odom home=(%.2f,%.2f)"
                          % (rid, src, self.look.cap, pinned[0], pinned[1]))
@@ -420,17 +425,34 @@ class Gate(Node):
 
     def send(self, lin, ang):
         self.fz.on_cmd(time.time(), float(lin), float(ang))      # the stall / slip detectors compare against what we SENT
+        self._note_envelope(float(lin), float(ang))
         m = Twist(); m.linear.x = float(lin); m.angular.z = float(ang)
         self.pub.publish(m); self.n_out += 1
         key = (round(lin, 3), round(ang, 3))
         if key != self.last_pub:
             self.log("OUT lin=%+.3f ang=%+.3f mode=%s" % (lin, ang, self.mode)); self.last_pub = key
 
+    def _note_envelope(self, lin, ang):
+        """Record the twist this look is actually sending. Failure here does not change the twist."""
+        if self.mode != "bounded" or not self.lease_id:
+            return
+        try:
+            import gb_intent
+            gb_intent.write_envelope(self.lease_id, lin, ang, time.monotonic())
+        except Exception:
+            pass
+
     def finish(self, why):
         was = self.mode
         self.mode = "idle"; self.lin = self.ang = 0.0; self.turn = None
         if self.look is not None:
             self.look.cancel(why); self.look = None
+        self.lease_id = ""
+        try:
+            import gb_intent
+            gb_intent.clear_envelope(time.monotonic(), why)
+        except Exception:
+            pass
         if self.src == "backoff": self.backoff = False
         now = time.time(); self.zero_until = now + ZERO_HOLD; self.last_why = why
         self.send(0.0, 0.0); self.last_zero = now

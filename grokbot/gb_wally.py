@@ -219,6 +219,11 @@ def drop_goals(why):
         bounded_look().cancel(why)
     except Exception:
         pass
+    try:
+        import gb_intent
+        gb_intent.revoke_active(time.monotonic(), why)
+    except Exception:
+        pass
     return True
 
 
@@ -521,8 +526,9 @@ def handle(text, protections=None):
         import gb_bounded
         import gb_estop
         import gb_intent
-        lease = gb_intent.open_lease(raw, time.time(), gb_bounded.CAP_S)
-        if lease.get("condition_kind") == "place":
+        preview = gb_intent.open_lease(raw, time.monotonic(), gb_bounded.CAP_S)
+        if preview.get("condition_kind") == "place":
+            lease = preview
             try:
                 gb_intent.write_status({
                     "lease": lease,
@@ -536,6 +542,7 @@ def handle(text, protections=None):
             return ("I have not moved. I heard a place to stop, and I cannot detect that place, "
                     "so I will not start a look in its place. Say look around for the 45 second look "
                     "with no place condition, or say stop by itself when you want me to stop.")
+        lease = gb_intent.issue_lease(raw, time.monotonic(), gb_bounded.CAP_S)
         bounded_look().request()
         try:
             gb_intent.write_status({"lease": lease, "compare": gb_intent.compare(lease, lease["t"]), "interlock": False})
@@ -544,7 +551,8 @@ def handle(text, protections=None):
         sent = False
         if _runtime and _publisher is not None:
             try:
-                _publish({"op": "bounded", "cap": gb_bounded.CAP_S, "src": "voice", "intent_id": lease["id"]})
+                _publish({"op": "bounded", "cap": gb_bounded.CAP_S, "src": "voice",
+                          "id": lease["id"], "intent_id": lease["id"]})
                 sent = True
             except Exception:
                 sent = False

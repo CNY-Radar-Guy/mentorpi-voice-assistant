@@ -6,6 +6,10 @@
 # * gate only: keeps Hiwonder's joystick_control stopped (it double-drives /controller/cmd_vel; the gate reads the pad)
 set -u
 WHAT=${1:-gate}
+if [ "$WHAT" = "actuation" ] && [ -z "${GB_TREE:-}" ]; then
+  echo "$(date '+%F %T') [actuation-run] actuation refused without GB_TREE. A flat /home/pi/grokbot copy is not a release. No motion."
+  exit 1
+fi
 C=MentorPi
 GB=/home/pi/grokbot
 TREE=${GB_TREE:-$GB}                            # a release dir when activation pinned this process
@@ -50,7 +54,11 @@ else
   CONT_CODE=/home/ubuntu/shared/gb_safety
 fi
 mkdir -p "$CODE"
-if [ "$WHAT" = "health" ]; then
+if [ "$WHAT" = "actuation" ]; then
+  for f in gb_actuation_node.py gb_actuation.py gb_motor_cap.py gb_intent.py gb_estop.py gb_paths.py; do
+    cp -f "$TREE/$f" "$CODE/$f"
+  done
+elif [ "$WHAT" = "health" ]; then
   cp -f "$TREE/gb_health_node.py" "$CODE/gb_health_node.py"
 else
   cp -f "$TREE/gb_safety/gb_$WHAT.py" "$CODE/gb_$WHAT.py"
@@ -152,6 +160,7 @@ fi
 export GB_SHARED_DIR=/home/ubuntu/shared/gb_safety
 NODE=gb_$WHAT.py
 [ "$WHAT" = "health" ] && NODE=gb_health_node.py
+[ "$WHAT" = "actuation" ] && NODE=gb_actuation_node.py
 [ "$WHAT" = "rgbguard" ] && export GB_RGB_MODEL=$CONT_CODE/yolov8n.onnx
 docker exec -u ubuntu $C pkill -f "$CONT_CODE/$NODE" 2>/dev/null
 
@@ -165,6 +174,26 @@ trap 'kill $MIR $JK 2>/dev/null; docker exec -u ubuntu '$C' pkill -INT -f '$CONT
 
 ENVS=()
 for v in $(compgen -e | grep -E '^(GATE_|WD_|GB_|OBS_)'); do ENVS+=(-e "$v=${!v}"); done
+if [ "$WHAT" = "actuation" ]; then
+  # A host MAINT path does not exist in the container. Drop it and pin the bind.
+  KEPT=()
+  i=0
+  while [ $i -lt ${#ENVS[@]} ]; do
+    key="${ENVS[$((i+1))]}"
+    case "$key" in
+      GB_MAINT_FILE=*|GB_LEASE_FILE=*|GB_GATE_ENVELOPE=*|GB_CONTROLLER_REMAPPED=*)
+        i=$((i+2)); continue ;;
+    esac
+    KEPT+=("${ENVS[$i]}" "${ENVS[$((i+1))]}")
+    i=$((i+2))
+  done
+  ENVS=()
+  if [ ${#KEPT[@]} -gt 0 ]; then ENVS=("${KEPT[@]}"); fi
+  ENVS+=(-e GB_MAINT_FILE=/home/ubuntu/shared/gb_safety/MAINT)
+  ENVS+=(-e GB_LEASE_FILE=/home/ubuntu/shared/gb_safety/lease.json)
+  ENVS+=(-e GB_GATE_ENVELOPE=/home/ubuntu/shared/gb_safety/gate_envelope.json)
+  ENVS+=(-e GB_SHARED_DIR=/home/ubuntu/shared/gb_safety)
+fi
 docker exec -u ubuntu -e PYTHONUNBUFFERED=1 "${ENVS[@]}" $C $NICE /home/ubuntu/shared/grokbot/rosrun.sh \
   python3 $CONT_CODE/$NODE &
 CHILD=$!
