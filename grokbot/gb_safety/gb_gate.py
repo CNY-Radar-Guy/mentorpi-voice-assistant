@@ -97,7 +97,7 @@ class Gate(Node):
         self.mode = "idle"; self.lin = 0.0; self.ang = 0.0; self.src = ""; self.rid = ""
         self.deadline = 0.0; self.t_start = 0.0; self.t_fresh = 0.0; self.zero_until = 0.0; self.last_zero = 0.0
         self.turn = None; self.yaw = None; self.yaw_src = None; self.yaw_t = 0.0
-        self.ox = 0.0; self.oy = 0.0; self.look = None
+        self.ox = 0.0; self.oy = 0.0; self.look = None; self.poses = {}
         self.estop = os.path.exists(ESTOP); self.maint = os.path.exists(MAINT); self.last_why = "start"; self.n_out = 0; self.last_pub = (None, None)
         import collections; self.seen = collections.deque(maxlen=256)
         self.joy = {"present": False, "lin": 0.0, "ang": 0.0, "t": 0.0}
@@ -121,16 +121,31 @@ class Gate(Node):
 
     # ------------------------------------------------------------ inputs
     def on_odom(self, m, t):
-        if t == E("GATE_ENCODERS", "/odom_raw"):                 # wheel encoders: stall / bump detection + pose for memory
-            q = m.pose.pose.orientation
-            self.ox = m.pose.pose.position.x; self.oy = m.pose.pose.position.y
-            self.fz.on_odom(time.time(), m.twist.twist.linear.x, m.twist.twist.angular.z, self.ox,
-                            self.oy, math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)))
-        if self.yaw_src not in (None, t) and time.time() - self.yaw_t < 0.5:
-            return                                        # prefer the first topic that is alive
         q = m.pose.pose.orientation
-        self.yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+        # Each topic keeps its own pose. A bounded look reads only /odom.
+        self.poses[t] = (time.time(), m.pose.pose.position.x, m.pose.pose.position.y, yaw,
+                         str(m.header.frame_id or ""), str(m.child_frame_id or ""))
+        if t == E("GATE_ENCODERS", "/odom_raw"):                 # wheel encoders: stall / bump detection only
+            self.ox = m.pose.pose.position.x; self.oy = m.pose.pose.position.y
+            self.fz.on_odom(time.time(), m.twist.twist.linear.x, m.twist.twist.angular.z, self.ox, self.oy, yaw)
+        if self.yaw_src not in (None, t) and time.time() - self.yaw_t < 0.5:
+            return                                        # timed turns keep the first topic that is alive
+        self.yaw = yaw
         self.yaw_src = t; self.yaw_t = time.time()
+
+    def _pinned_odom(self, now):
+        """Filtered /odom only. A stale or wrong-frame sample does not fall back to /odom_raw."""
+        rec = self.poses.get("/odom")
+        if not rec:
+            return None
+        recv, x, y, yaw, frame, child = rec
+        import gb_bounded
+        if not gb_bounded.fresh_age(now - recv, gb_bounded.ODOM_FRESH_S):
+            return None
+        if frame not in ("odom", "/odom") or child not in ("base_footprint", "/base_footprint"):
+            return None
+        return (x, y, yaw, now - recv)
 
     def on_scan(self, m):
         v = OB.lidar_analyze(m.ranges, m.angle_min, m.angle_increment, max(SELF_MIN, m.range_min), m.range_max, time.time())
@@ -258,19 +273,30 @@ class Gate(Node):
                          % (rid, src, lin, ang, dur, time.strftime("%H:%M:%S", time.localtime(self.deadline)),
                             self.front, self.rear, self.sweep))
                 self.send(lin, ang)
+            elif op == "bounded_return":
+                if self.mode != "bounded" or self.look is None or not self.look.active:
+                    self.log("REFUSED bounded_return id=%s: no look is running" % rid); return
+                self.look.start_return()
+                self.log("bounded return requested id=%s" % rid)
             elif op == "bounded":
-                if self.yaw is None or now - self.yaw_t > 0.5 or now - self.scan_t > 0.5:
-                    self.log("REFUSED bounded id=%s: odom or scan not fresh" % rid); return
                 import gb_bounded
+                pinned = self._pinned_odom(now)
+                if pinned is None or not gb_bounded.fresh_age(now - self.scan_t, gb_bounded.SCAN_FRESH_S):
+                    self.log("REFUSED bounded id=%s: pinned /odom or scan not fresh" % rid); return
                 self.look = gb_bounded.BoundedLook()
                 try:
                     cap = float(d.get("cap", gb_bounded.CAP_S))
                 except (TypeError, ValueError):
                     cap = gb_bounded.CAP_S
-                self.look.begin(now, (self.ox, self.oy, self.yaw), cap)
+                self.look.begin(now, pinned[:3], cap, source="/odom", frame="odom", child="base_footprint",
+                                lidar_yaw=gb_bounded.LIDAR_YAW_RAD)
+                if not self.look.active:
+                    self.look = None
+                    self.log("REFUSED bounded id=%s: %s" % (rid, "source")); return
                 self.mode = "bounded"; self.src = src; self.rid = rid; self.t_start = now
                 self.deadline = now + self.look.cap; self.lin = 0.0; self.ang = 0.0; self.turn = None
-                self.log("START bounded id=%s src=%s cap=%.0fs home=(%.2f,%.2f)" % (rid, src, self.look.cap, self.ox, self.oy))
+                self.log("START bounded id=%s src=%s cap=%.0fs source=/odom home=(%.2f,%.2f)"
+                         % (rid, src, self.look.cap, pinned[0], pinned[1]))
             elif op == "turn":
                 try: deg = float(d.get("deg", 90))
                 except Exception: deg = 90.0
@@ -403,6 +429,8 @@ class Gate(Node):
     def finish(self, why):
         was = self.mode
         self.mode = "idle"; self.lin = self.ang = 0.0; self.turn = None
+        if self.look is not None:
+            self.look.cancel(why); self.look = None
         if self.src == "backoff": self.backoff = False
         now = time.time(); self.zero_until = now + ZERO_HOLD; self.last_why = why
         self.send(0.0, 0.0); self.last_zero = now
@@ -480,12 +508,14 @@ class Gate(Node):
                 if abs(rem) < 0.25: w = max(0.3, w * 0.7)
                 self.send(0.0, math.copysign(w, rem))
             elif self.mode == "bounded":
-                if self.look is None or now - self.scan_t > 0.5 or self.yaw is None or now - self.yaw_t > 0.5:
+                import gb_bounded
+                pinned = self._pinned_odom(now)
+                if self.look is None or pinned is None or not gb_bounded.fresh_age(now - self.scan_t, gb_bounded.SCAN_FRESH_S):
                     if self.look is not None:
                         self.look.cancel("sensors_stale")
                     self.finish("bounded sensors stale"); return
-                cmd = self.look.step(now, self.front, self.rear, self.sweep, (self.ox, self.oy, self.yaw),
-                                     now - self.scan_t, now - self.yaw_t, estop=self.estop)
+                cmd = self.look.step(now, self.front, self.rear, self.sweep, pinned[:3],
+                                     now - self.scan_t, pinned[3], estop=self.estop, source="/odom")
                 if not cmd.get("allow"):
                     self.finish("bounded " + str(cmd.get("reason"))); return
                 _l, _a, why = self.guard(cmd.get("lin") or 0.0, cmd.get("ang") or 0.0)

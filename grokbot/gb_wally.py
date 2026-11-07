@@ -310,9 +310,6 @@ def tick_runtime(now=None):
         else:
             _publish({"op": "stop", "allow": False, "reason": cmd.get("reason")})
         _follow_demand(bool(fl.active))
-    look = bounded_look()
-    if look.requested and not look.active:
-        _publish({"op": "stop", "allow": False, "reason": "bounded_waiting_for_sensors"})
     m = mission()
     if m.phase != "idle":
         if maint or protections.get("estop"):
@@ -503,7 +500,24 @@ def handle(text, protections=None):
     taught = teacher().hear(t, _default_capture)
     if taught:
         return taught
-    if re.search(r"\b(explore|look around|map this room|come home|go home|return home)\b", t):
+    if re.search(r"\bmap this room\b", t):
+        return ("I have not moved. Mapping is not running, and this is not a mapped explore. "
+                "Say look around for a 45 second odometry look through the gate. Nav2 is not running.")
+    if re.search(r"\b(come home|go home|return home)\b", t):
+        sent = False
+        if _runtime and _publisher is not None:
+            try:
+                _publish({"op": "bounded_return", "src": "voice"})
+                sent = True
+            except Exception:
+                sent = False
+        if sent:
+            return ("I asked the gate to return only if a look is already running. "
+                    "That uses the filtered odometry and stops on its own time and distance limit. "
+                    "It is not a surveyed position. Nav2 is not running. I have not seen the wheels move.")
+        return ("I have not moved. There is no home pose from this boot unless a look is already running. "
+                "Nav2 is not running.")
+    if re.search(r"\b(explore|look around)\b", t):
         import gb_bounded
         bounded_look().request()
         sent = False
@@ -514,11 +528,12 @@ def handle(text, protections=None):
             except Exception:
                 sent = False
         if sent:
-            return ("I asked the gate for a short look. It drives only while the laser and odometry are fresh, "
-                    "stops at the existing obstacle limits, and returns to the pose where it started. "
-                    "Nav2 is not running. A restart will not resume it. I have not seen the wheels move.")
-        return ("I have not moved. A short look runs through the gate once odometry and the laser are fresh, "
-                "then returns to that odometry pose. Nav2 is not running, and a restart will not resume it.")
+            return ("I asked the gate for a 45 second odometry look, not a mapped explore. "
+                    "It uses filtered /odom only, stops at the existing obstacle limits, and the return "
+                    "has its own time and distance limit. Nav2 is not running. A restart will not resume it. "
+                    "I have not seen the wheels move.")
+        return ("I have not moved. Look around is a 45 second odometry look through the gate, not a mapped explore. "
+                "It uses filtered /odom only. Nav2 is not running, and a restart will not resume it.")
     if re.search(r"\b(look for a person|acquire|find a person)\b", t):
         _follow_demand_mode("acquire")
         return "I am looking for a person. Autonomy is unchanged and I am not moving."
