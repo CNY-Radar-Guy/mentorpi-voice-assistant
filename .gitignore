@@ -56,6 +56,7 @@ venv/
 
 # Model weights and Piper voices (download on the Pi; do not commit)
 *.onnx
+!grokbot/gb_safety/yolov8n.onnx
 *.ort
 *.pt
 *.pth

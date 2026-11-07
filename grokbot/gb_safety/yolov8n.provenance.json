@@ -1,0 +1,15 @@
+{
+  "file": "yolov8n.onnx",
+  "weights": "ultralytics/assets yolov8n.pt v8.3.0",
+  "weights_url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt",
+  "weights_sha256": "f59b3d833e2ff32e194b5bb8e08d211dc7c5bdf144b90d2c8412c47ccfc83b36",
+  "exporter": "ultralytics 8.3.40, torch.onnx legacy exporter, opset 12",
+  "imgsz": 416,
+  "dynamic": false,
+  "simplify": false,
+  "nms_in_graph": false,
+  "output_shape": [1, 84, 3549],
+  "onnx_sha256": "82ff951053444532618995caf52095850890cffb0f81fb1a6fdad928be7b31ad",
+  "opencv_dnn_checked": ["4.10.0", "5.0.0"],
+  "note": "Static 416. A 320 or 640 blob is the wrong graph and OpenCV rejects it. This is not a Pi timing measurement."
+}

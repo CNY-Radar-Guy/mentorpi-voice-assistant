@@ -148,22 +148,9 @@ class RgbGuard(Node):
         return size, reason
 
     def detect(self, img):
-        h, w = img.shape[:2]
-        size = self.in_size or 0
-        if size <= 0:
-            return []
+        import gb_yolo
         cv2.setNumThreads(2)
-        blob = cv2.dnn.blobFromImage(img, 1 / 255.0, (size, size), swapRB=True, crop=False)
-        self.net.setInput(blob); out = self.net.forward()[0].T          # 8400 x 84
-        sc = out[:, 4:]; ci = sc.argmax(1); cf = sc[np.arange(len(sc)), ci]; k = cf > CONF
-        b = out[k, :4]; ci = ci[k]; cf = cf[k]; res = []
-        if len(b):
-            sx, sy = w / float(size), h / float(size)
-            xy = np.stack([(b[:, 0] - b[:, 2] / 2) * sx, (b[:, 1] - b[:, 3] / 2) * sy, b[:, 2] * sx, b[:, 3] * sy], 1)
-            for i in np.array(cv2.dnn.NMSBoxes(xy.tolist(), cf.tolist(), CONF, 0.45)).flatten():
-                x1, y1, bw, bh = [float(v) for v in xy[i]]
-                res.append((COCO[int(ci[i])], float(cf[i]), x1, y1, x1 + bw, y1 + bh))
-        return res
+        return gb_yolo.detect(self.net, img, self.in_size or 0, COCO, conf=CONF)
 
     def worker(self):
         while rclpy.ok():

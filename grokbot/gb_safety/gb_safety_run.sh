@@ -62,9 +62,14 @@ cp -f "$TREE/gb_metric.py" "$CODE/gb_metric.py" 2>/dev/null || true
 cp -f "$TREE/gb_demand.py" "$CODE/gb_demand.py" 2>/dev/null || true
 cp -f "$TREE/gb_hands.py" "$CODE/gb_hands.py" 2>/dev/null || true
 cp -f "$TREE/gb_nav.py" "$CODE/gb_nav.py" 2>/dev/null || true
+cp -f "$TREE/gb_paths.py" "$CODE/gb_paths.py"
+cp -f "$TREE/gb_yolo.py" "$CODE/gb_yolo.py" 2>/dev/null || true
 NICE=""
 if [ "$WHAT" = rgbguard ]; then
-  cp -f "$GB/models/yolov8n.onnx" "$CODE/yolov8n.onnx"; NICE="nice -n 12"   # advisory only: never starve the safety loop
+  # The release model is the static 416 export. The host models directory still
+  # holds the older static 640 file and is not the one this unit runs.
+  cp -f "$TREE/gb_safety/yolov8n.onnx" "$CODE/yolov8n.onnx"
+  NICE="nice -n 12"   # advisory only: never starve the safety loop
 fi
 log() { echo "$(date '+%F %T') [$WHAT-run] $*"; }
 
