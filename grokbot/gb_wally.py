@@ -215,6 +215,10 @@ def drop_goals(why):
         mission().cancel(why)
     except Exception:
         pass
+    try:
+        bounded_look().cancel(why)
+    except Exception:
+        pass
     return True
 
 
@@ -237,8 +241,17 @@ def _obs():
 _runtime = False
 _publisher = None
 _follow = None
+_bounded = None
 _rt_stop = None
 _rt_thread = None
+
+
+def bounded_look():
+    global _bounded
+    if _bounded is None:
+        import gb_bounded
+        _bounded = gb_bounded.BoundedLook()
+    return _bounded
 
 
 def follow_loop():
@@ -297,6 +310,9 @@ def tick_runtime(now=None):
         else:
             _publish({"op": "stop", "allow": False, "reason": cmd.get("reason")})
         _follow_demand(bool(fl.active))
+    look = bounded_look()
+    if look.requested and not look.active:
+        _publish({"op": "stop", "allow": False, "reason": "bounded_waiting_for_sensors"})
     m = mission()
     if m.phase != "idle":
         if maint or protections.get("estop"):
@@ -488,8 +504,10 @@ def handle(text, protections=None):
     if taught:
         return taught
     if re.search(r"\b(explore|look around|map this room|come home|go home|return home)\b", t):
-        return ("I can't explore or go home yet. Nav2, SLAM, and a home position are not running, "
-                "and the saved map is not in use. I have not moved.")
+        import gb_bounded
+        bounded_look().request()
+        return ("I have not moved. A short look can run through the gate once odometry and the laser are fresh, "
+                "then return to that odometry pose. Nav2 is not running, and a restart will not resume it.")
     if re.search(r"\b(look for a person|acquire|find a person)\b", t):
         _follow_demand_mode("acquire")
         return "I am looking for a person. Autonomy is unchanged and I am not moving."
