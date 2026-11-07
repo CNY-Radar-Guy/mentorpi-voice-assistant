@@ -1,0 +1,18 @@
+[Unit]
+Description=Admitted motor commands (provisional cap, lease deadline). Does not clear MAINT.
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/grokbot
+Environment=GB_CONTROLLER_REMAPPED=0
+Environment=GB_MAINT_FILE=/home/pi/grokbot/data/MAINT
+ExecStart=/usr/bin/python3 /home/pi/grokbot/gb_actuation_node.py
+Restart=on-failure
+# Set GB_CONTROLLER_REMAPPED=1 only after ros_robot_controller subscribes to
+# /gb/set_motor_admitted instead of ~/set_motor. Until then this unit does not
+# stand in front of the board. Do not disable gb-watchdog. Do not remove MAINT.
+
+[Install]
+WantedBy=multi-user.target

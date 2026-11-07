@@ -94,6 +94,34 @@ check("the saved cap matches the derivation and is not a firmware rating",
       saved and saved["firmware_cap"] is False and saved["serial_bypass"] is True and saved["enforced_on_robot"] is False)
 loose = dict(saved); loose["half_rps"] = saved["half_rps"] * 2
 check("a looser saved cap is rejected", cap.config_ok(loose) is False)
+import gb_actuation
+gb_wally.bounded_look().cancel("test")
+refused = gb_wally.handle("explore the room and stop at the door")
+check("a place condition does not start the 45 second look",
+      "will not start" in refused and gb_wally.bounded_look().requested is False, refused)
+lease = gb_intent.open_lease("look around", 0, 45)
+ok_speeds, ok_dec = gb_actuation.admit([(1, 0.1), (2, 0.1), (3, -0.1), (4, -0.1)], 10, lease, maint=False)
+check("a live lease under the cap is admitted", ok_dec["admitted"] and ok_dec["reason"] == "within_provisional_cap" and ok_dec["serial_bypass"] is True)
+over, over_dec = gb_actuation.admit([(1, 5.0), (2, -5.0), (3, 0.0), (4, 0.0)], 10, lease, maint=False)
+check("an over-cap command is clamped and labeled provisional",
+      over_dec["admitted"] and over_dec["reason"] == "clamped" and over_dec["hardware_top_speed_verified"] is False
+      and all(abs(r) <= cap.half_rps() + 1e-9 for _i, r in over))
+late_s, late_dec = gb_actuation.admit([(1, 0.1), (2, 0.1), (3, 0.1), (4, 0.1)], 50, lease, maint=False)
+check("motion after the deadline becomes zero", late_dec["reason"] == "deadline" and all(r == 0.0 for _i, r in late_s))
+held, held_dec = gb_actuation.admit([(1, 0.1), (2, 0.0), (3, 0.0), (4, 0.0)], 10, lease, maint=True)
+check("maintenance replaces motion with zero", held_dec["reason"] == "maintenance" and all(r == 0.0 for _i, r in held))
+bare, bare_dec = gb_actuation.admit([(1, 0.2), (2, 0.0), (3, 0.0), (4, 0.0)], 10, None, maint=False)
+check("motion without a lease becomes zero", bare_dec["reason"] == "no_lease" and bare_dec["repair"]["applied"] is False)
+bad, bad_dec = gb_actuation.admit([(1, float("nan"))], 10, lease, maint=False)
+check("a bad motor list becomes zero", bad_dec["reason"] == "malformed" and all(r == 0.0 for _i, r in bad))
+place = gb_intent.open_lease("explore and stop at the door", 0, 45)
+blocked, blocked_dec = gb_actuation.admit([(1, 0.1), (2, 0.1), (3, 0.1), (4, 0.1)], 10, place, maint=False)
+check("a place lease is not admitted", blocked_dec["reason"] == "unenforced_condition" and all(r == 0.0 for _i, r in blocked))
+launch = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "deploy", "ros_robot_controller.remap.launch.py")).read()
+install = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "deploy", "actuation_install.sh")).read()
+check("the controller remap is the install boundary", "set_motor" in launch and "/gb/set_motor_admitted" in launch)
+check("install does not clear the hold or the watchdog",
+      "Do not remove MAINT" in install and "Do not disable" in install and "gb-watchdog" in install)
 
 print("test_intent: %d passed, %d failed" % (OK, BAD))
 sys.exit(0 if BAD == 0 else 1)

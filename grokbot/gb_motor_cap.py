@@ -77,6 +77,8 @@ def config_body():
         "peak_rps": peak_rps(),
         "half_rps": half_rps(),
         "fraction": 0.5,
+        "provisional_software_cap": True,
+        "hardware_top_speed_verified": False,
         "firmware_cap": False,
         "serial_bypass": True,
         "enforced_on_robot": False,
@@ -88,6 +90,8 @@ def config_ok(body):
     """A saved file may not raise the half-speed ceiling."""
     try:
         if body.get("firmware_cap") is not False or body.get("serial_bypass") is not True:
+            return False
+        if body.get("hardware_top_speed_verified") is not False or body.get("provisional_software_cap") is not True:
             return False
         if abs(float(body.get("half_rps")) - half_rps()) > 1e-9:
             return False

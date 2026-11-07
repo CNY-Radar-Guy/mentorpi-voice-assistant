@@ -16,4 +16,5 @@ def install():
     os.environ["GB_DEPTH_SCALE_FILE"] = os.path.join(root, "missing-depth-scale.json")
     os.environ["GB_TEACH_DB"] = os.path.join(root, "teach.db")
     os.environ["GB_INTENT_FILE"] = os.path.join(root, "intent_status.json")
+    os.environ["GB_MAINT_FILE"] = os.path.join(root, "MAINT")
     return root

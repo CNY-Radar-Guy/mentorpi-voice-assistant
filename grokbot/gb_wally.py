@@ -521,8 +521,22 @@ def handle(text, protections=None):
         import gb_bounded
         import gb_estop
         import gb_intent
-        bounded_look().request()
         lease = gb_intent.open_lease(raw, time.time(), gb_bounded.CAP_S)
+        if lease.get("condition_kind") == "place":
+            try:
+                gb_intent.write_status({
+                    "lease": lease,
+                    "motion": False,
+                    "reason": "place_not_detectable",
+                    "interlock": False,
+                    "all_writer_pause": False,
+                })
+            except Exception:
+                pass
+            return ("I have not moved. I heard a place to stop, and I cannot detect that place, "
+                    "so I will not start a look in its place. Say look around for the 45 second look "
+                    "with no place condition, or say stop by itself when you want me to stop.")
+        bounded_look().request()
         try:
             gb_intent.write_status({"lease": lease, "compare": gb_intent.compare(lease, lease["t"]), "interlock": False})
         except Exception:
