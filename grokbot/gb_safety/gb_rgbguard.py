@@ -48,15 +48,18 @@ def hazard_from(dets, w, h):
 class RgbGuard(Node):
     def __init__(self):
         super().__init__("gb_rgbguard")
-        cv2.setNumThreads(2)
+        cv2.setNumThreads(2)   # production profile: do not raise this and starve the gate
         self.net = cv2.dnn.readNetFromONNX(MODEL)
+        self.in_size, self.in_size_reason = self._select_size()
         self.moving = False; self.idle_since = time.time(); self.sub = None; self.depth_sub = None; self.info_sub = None
-        self.img = None; self.img_t = 0.0; self.depth = None; self.depth_t = 0.0; self.k = None; self.scan = None; self.done_t = 0.0
+        self.img = None; self.img_t = 0.0; self.depth = None; self.depth_t = 0.0; self.depth_buf = []; self.k = None; self.scan = None; self.done_t = 0.0
+        self._buf_lock = threading.Lock()
         self._last_infer = 0.7; self._held_motion = False
         self.create_subscription(String, "/gb/gate_status", self.on_status, 10)
         self.create_timer(0.5, self.manage)
         threading.Thread(target=self.worker, daemon=True).start()
-        self.get_logger().info("rgb guard up: %s on %s, <= %.1f Hz, only while moving, nice'd" % (os.path.basename(MODEL), TOPIC, HZ))
+        self.get_logger().info("rgb guard up: %s on %s input %s (%s) threads 2" % (
+            os.path.basename(MODEL), TOPIC, self.in_size, self.in_size_reason))
 
     def on_status(self, m):
         try: mode = json.loads(m.data).get("mode", "idle")
@@ -100,7 +103,7 @@ class RgbGuard(Node):
             hold = 3.0 if self._held_motion else 0.0
             if self.idle_since and time.time() - self.idle_since >= hold:
                 self._drop_sub("sub"); self._drop_sub("depth_sub"); self._drop_sub("info_sub"); self._drop_sub("scan_sub")
-                self.img = None; self.depth = None; self.scan = None; self._held_motion = False
+                self.img = None; self.depth = None; self.depth_buf = []; self.scan = None; self._held_motion = False
 
     def on_scan(self, m):
         beams = []
@@ -115,19 +118,47 @@ class RgbGuard(Node):
 
     def on_depth(self, m):
         import gb_metric
-        self.depth = gb_metric.keep_latest(self.depth, m); self.depth_t = time.time()
+        recv = time.time()
+        cap, _why = gb_metric.capture_time(_header_stamp(m), recv)
+        snap = type("DepthSnap", (), {})()
+        snap.encoding = m.encoding
+        snap.height = m.height
+        snap.width = m.width
+        snap.step = m.step
+        snap.is_bigendian = getattr(m, "is_bigendian", 0)
+        snap.data = bytes(m.data)
+        snap.cap = cap
+        snap.recv = recv
+        with self._buf_lock:
+            self.depth_buf.append(snap)
+            del self.depth_buf[:-8]
+            self.depth = m
+            self.depth_t = recv
 
     def on_info(self, m):
         self.k = (float(m.k[0]), float(m.k[4]), float(m.k[2]), float(m.k[5]))
 
+    def _select_size(self):
+        import gb_metric
+        def run(size):
+            blob = np.zeros((1, 3, int(size), int(size)), np.float32)
+            self.net.setInput(blob)
+            return self.net.forward()
+        size, reason, _tried = gb_metric.choose_yolo_size(run)
+        return size, reason
+
     def detect(self, img):
         h, w = img.shape[:2]
-        blob = cv2.dnn.blobFromImage(img, 1 / 255.0, (SIZE, SIZE), swapRB=True, crop=False)
+        size = self.in_size or 0
+        if size <= 0:
+            return []
+        cv2.setNumThreads(2)
+        blob = cv2.dnn.blobFromImage(img, 1 / 255.0, (size, size), swapRB=True, crop=False)
         self.net.setInput(blob); out = self.net.forward()[0].T          # 8400 x 84
         sc = out[:, 4:]; ci = sc.argmax(1); cf = sc[np.arange(len(sc)), ci]; k = cf > CONF
         b = out[k, :4]; ci = ci[k]; cf = cf[k]; res = []
         if len(b):
-            sx, sy = w / float(SIZE), h / float(SIZE)
+            sx, sy = w / float(size), h / float(size)
             xy = np.stack([(b[:, 0] - b[:, 2] / 2) * sx, (b[:, 1] - b[:, 3] / 2) * sy, b[:, 2] * sx, b[:, 3] * sy], 1)
             for i in np.array(cv2.dnn.NMSBoxes(xy.tolist(), cf.tolist(), CONF, 0.45)).flatten():
                 x1, y1, bw, bh = [float(v) for v in xy[i]]
@@ -147,19 +178,20 @@ class RgbGuard(Node):
                 img = np.frombuffer(bytes(m.data), dtype=np.uint8).reshape(m.height, m.width, 3)
                 if m.encoding == "rgb8": img = img[:, :, ::-1]
                 receive_t = self.img_t
-                depth_msg = self.depth
-                depth_receive = self.depth_t
                 t0 = time.time(); dets = self.detect(img); ms = (time.time() - t0) * 1000
                 self._last_infer = max(0.05, ms / 1000.0)
                 import gb_metric
                 cap, cap_why = gb_metric.capture_time(_header_stamp(m), receive_t)
-                depth_cap = None
-                if depth_msg is not None:
-                    depth_cap, _depth_why = gb_metric.capture_time(_header_stamp(depth_msg), depth_receive)
+                with self._buf_lock:
+                    buf = list(self.depth_buf)
+                idx = gb_metric.match_depth_stamp(cap, [s.cap for s in buf]) if cap is not None else None
+                depth_msg = buf[idx] if idx is not None else None
+                depth_cap = depth_msg.cap if depth_msg is not None else None
                 write_t = time.time()
                 hz = hazard_from(dets, m.width, m.height)
                 people = [dt for dt in dets if dt[0] == "person"]
                 d = {"hazard": bool(hz), "ms": round(ms), "infer_s": round(self._last_infer, 3),
+                     "input_size": self.in_size, "input_size_reason": self.in_size_reason, "cv_threads": 2,
                      "n": len(dets), "detect_ok": True, "wh": [m.width, m.height], "person": None}
                 if hz: d.update(hz)
                 if people:
@@ -199,7 +231,11 @@ class RgbGuard(Node):
 
     def _publish_track(self, body, cap, receive_t, write_t):
         import gb_metric
-        _atomic(TRACK, gb_metric.stamp_observation(body, cap, receive_t, write_t, self._last_infer))
+        body = gb_metric.stamp_observation(body, cap, receive_t, write_t, self._last_infer)
+        body["input_size"] = self.in_size
+        body["input_size_reason"] = self.in_size_reason
+        body["cv_threads"] = 2
+        _atomic(TRACK, body)
 
     def _write_metric(self, people, image, cap, cap_why, depth_msg, depth_cap, receive_t, write_t):
         """Demand-driven range. Age is the capture stamp. No invented distance."""
@@ -210,16 +246,25 @@ class RgbGuard(Node):
         mode = self.demand()
         if mode not in ("follow", "point", "acquire"):
             return
+        status = gb_metric.depth_scale_status()
+        note = {"scale_record": status.get("reason"), "scale_path": status.get("path")}
         if cap is None:
-            body = gb_metric.sighting_record(receive_t, _people_dicts(people), {"scale_reason": cap_why})
+            note["scale_reason"] = cap_why
+            body = gb_metric.sighting_record(receive_t, _people_dicts(people), note)
             self._publish_track(body, None, receive_t, write_t)
             return
-        obs = self._lidar_obs(people) or {}
-        paired = depth_msg is not None and self.k is not None and gb_metric.frames_paired(cap, depth_cap)
-        fresh = gb_metric.fresh_capture(cap, write_t) and gb_metric.fresh_capture(depth_cap, write_t)
-        if not paired or not fresh:
-            why = "capture_not_fresh" if paired else "frames_not_paired"
-            obs = dict(obs); obs["scale_reason"] = why
+        obs = dict(self._lidar_obs(people) or {})
+        obs.update(note)
+        if depth_msg is None or not gb_metric.frames_paired(cap, depth_cap):
+            obs["scale_reason"] = "frames_not_paired"
+            self._publish_track(gb_metric.sighting_record(cap, _people_dicts(people), obs), cap, receive_t, write_t)
+            return
+        if not (gb_metric.fresh_capture(cap, write_t) and gb_metric.fresh_capture(depth_cap, write_t)):
+            obs["scale_reason"] = "capture_not_fresh"
+            self._publish_track(gb_metric.sighting_record(cap, _people_dicts(people), obs), cap, receive_t, write_t)
+            return
+        if self.k is None:
+            obs["scale_reason"] = "no_camera_info"
             self._publish_track(gb_metric.sighting_record(cap, _people_dicts(people), obs), cap, receive_t, write_t)
             return
         import numpy as np
@@ -229,7 +274,7 @@ class RgbGuard(Node):
         elif depth_msg.encoding in ("16UC1", "mono16"):
             documented = gb_metric.validated_depth_scale(depth_msg.encoding)
             if not documented:
-                obs = dict(obs); obs["scale_reason"] = "no_scale_record"
+                obs = dict(obs); obs["scale_reason"] = status.get("reason") or "no_scale_record"
                 self._publish_track(gb_metric.sighting_record(cap, _people_dicts(people), obs), cap, receive_t, write_t)
                 return
             import gb_obstacle

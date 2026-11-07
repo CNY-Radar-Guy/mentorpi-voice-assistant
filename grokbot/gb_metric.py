@@ -54,6 +54,75 @@ def frames_paired(rgb_t, depth_t, max_delta=PAIR_MAX_S):
         return False
 
 
+def match_depth_stamp(rgb_cap, stamps, max_delta=PAIR_MAX_S):
+    """Index of the depth stamp that matches this RGB capture.
+
+    A later frame in the buffer does not replace an exact match. None when
+    nothing is within max_delta.
+    """
+    if rgb_cap is None:
+        return None
+    best_i = None
+    best_dt = None
+    for i, stamp in enumerate(stamps or ()):
+        try:
+            dt = abs(float(stamp) - float(rgb_cap))
+        except (TypeError, ValueError):
+            continue
+        if dt <= float(max_delta) and (best_dt is None or dt < best_dt):
+            best_i = i
+            best_dt = dt
+    return best_i
+
+
+def yolo_cells(size):
+    """YOLOv8 head cells for a square input. None unless the size is a multiple of 32."""
+    try:
+        size = int(size)
+    except (TypeError, ValueError):
+        return None
+    if size < 32 or size % 32 != 0:
+        return None
+    return (size // 8) ** 2 + (size // 16) ** 2 + (size // 32) ** 2
+
+
+def yolo_output_cells(out):
+    """Cell count from one forward output. None if the tensor is not a YOLO head."""
+    arr = out[0] if isinstance(out, (list, tuple)) else out
+    try:
+        shape = [int(n) for n in arr.shape]
+    except Exception:
+        return None
+    rest = [n for n in shape if n not in (1, 84)]
+    if len(rest) == 1:
+        return rest[0]
+    return None
+
+
+def choose_yolo_size(run, candidates=(416, 320, 640)):
+    """First candidate whose forward output has that size's own cell count.
+
+    A static 640 network that still emits 8400 cells for a 416 blob is rejected.
+    run(size) returns the forward output or raises. Threads are not changed here.
+    """
+    tried = []
+    for size in candidates:
+        expect = yolo_cells(size)
+        if expect is None:
+            tried.append("%s:bad" % size)
+            continue
+        try:
+            got = yolo_output_cells(run(size))
+        except Exception as ex:
+            tried.append("%s:%s" % (size, type(ex).__name__))
+            continue
+        if got != expect:
+            tried.append("%s:cells_%s" % (size, got))
+            continue
+        return int(size), "matched_%s" % int(size), tried
+    return None, "no_valid_input", tried
+
+
 def fresh_capture(capture_t, now, limit=OBSERVATION_FRESH_S):
     """Age of the capture. A later write time cannot make it fresh."""
     try:
@@ -204,11 +273,24 @@ def load_depth_record(path=None):
     return body if isinstance(body, dict) else None
 
 
+def depth_scale_status(path=None):
+    """Assess the logged record without requiring a live depth frame."""
+    if path is None:
+        import gb_paths
+        path = gb_paths.depth_scale_record_path()
+    body = load_depth_record(path)
+    if body is None:
+        return {"ok": False, "reason": "no_scale_record", "path": path, "unit": None, "scale": None}
+    found = assess_depth_record(body)
+    return {"ok": bool(found.get("ok")), "reason": found.get("reason"), "path": path,
+            "unit": found.get("unit"), "scale": found.get("scale")}
+
+
 def validated_depth_scale(encoding, path=None):
     """(0.001, documented_mm) only when the logged record passes. Otherwise None."""
     if str(encoding or "") not in ("mono16", "16UC1"):
         return None
-    found = assess_depth_record(load_depth_record(path))
+    found = depth_scale_status(path)
     if not found.get("ok"):
         return None
     return found["scale"], found["unit"]
@@ -472,8 +554,12 @@ def sighting_record(now, people, range_obs=None):
         if obs.get("clearance_m") is not None:
             person["clearance_m"] = float(obs["clearance_m"])
     else:
-        person["reason"] = "depth_unit_unconfirmed"
+        person["reason"] = obs.get("scale_reason") or "depth_unit_unconfirmed"
         person["lidar_reason"] = "extrinsics_not_validated"
         if obs.get("scale_reason"):
             person["scale_reason"] = obs.get("scale_reason")
+        if obs.get("scale_record"):
+            person["scale_record"] = obs.get("scale_record")
+        if obs.get("scale_path"):
+            person["scale_path"] = obs.get("scale_path")
     return {"t": now, "detect_ok": True, "person": person}

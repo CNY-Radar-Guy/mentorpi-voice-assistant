@@ -13,12 +13,15 @@ OUT = os.environ.get("GB_HEALTH_FILE", "/home/ubuntu/shared/gb_safety/health.jso
 def record(now, lidar_frac, depth_encoding, depth_samples, lidar_front_m, user_lidar=None, user_camera=None,
            topic_online=None, nonzero_frac=None, forward_raw=None, tf_fresh=False, camera_ahead_m=None):
     import gb_health
-    documented = None
+    status = {"ok": False, "reason": "no_scale_record", "path": None, "unit": None, "scale": None}
     try:
         import gb_metric
-        documented = gb_metric.validated_depth_scale(depth_encoding)
+        status = gb_metric.depth_scale_status()
     except Exception:
-        documented = None
+        status = {"ok": False, "reason": "no_scale_record", "path": None, "unit": None, "scale": None}
+    documented = None
+    if status.get("ok") and str(depth_encoding or "mono16") in ("mono16", "16UC1"):
+        documented = (status.get("scale"), status.get("unit"))
     if documented:
         scale, how = documented
     else:
@@ -29,7 +32,10 @@ def record(now, lidar_frac, depth_encoding, depth_samples, lidar_front_m, user_l
                 forward_raw=forward_raw, camera_ahead_m=camera_ahead_m, tf_fresh=tf_fresh)
         except Exception:
             scale, how = None, "unavailable"
-    frac = gb_health.depth_valid_fraction(depth_samples if forward_raw is None else [forward_raw], scale) if scale else 0.0
+    samples = [] if forward_raw is None else [forward_raw]
+    if forward_raw is None and depth_samples:
+        samples = depth_samples
+    frac = gb_health.depth_valid_fraction(samples, scale) if scale else 0.0
     lidar_ok = lidar_frac is not None and float(lidar_frac) >= gb_health.MIN_VALID_FRAC
     metric = how in gb_health.VALIDATED_DEPTH_UNITS and frac >= gb_health.MIN_VALID_FRAC
     topic = bool(depth_samples) if topic_online is None else bool(topic_online)
@@ -51,11 +57,14 @@ def record(now, lidar_frac, depth_encoding, depth_samples, lidar_front_m, user_l
         "depth_topic_online": topic,
         "depth_metric_valid": bool(metric),
         "depth_online": bool(metric),
-        "depth_unit": how if metric else None,
-        "depth_scale_reason": how,
+        "depth_unit": how if metric else (status.get("unit") if status.get("ok") else None),
+        "depth_scale_reason": status.get("reason") if status.get("ok") else how,
+        "depth_scale_record_ok": bool(status.get("ok")),
+        "depth_scale_record_reason": status.get("reason"),
+        "depth_scale_record_path": status.get("path"),
         "depth_valid_frac": float(frac) if metric else 0.0,
         "depth_nonzero_frac": nz if topic else 0.0,
-        "depth_scale_m": scale if metric else None,
+        "depth_scale_m": scale if metric else (status.get("scale") if status.get("ok") else None),
         "tf_applied": bool(tf_fresh),
         "lidar_topic": "/scan_raw",
         "lidar_sub_qos": "best_effort_volatile",

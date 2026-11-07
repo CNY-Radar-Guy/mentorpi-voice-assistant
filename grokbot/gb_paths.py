@@ -69,11 +69,29 @@ def extrinsics_path():
 
 
 def depth_scale_record_path():
-    """Logged millimetre proof. Absent until the runtime writes the real samples."""
+    """Logged millimetre proof. The same file the runtime wrote, on host or in the container.
+
+    An explicit GB_DEPTH_SCALE_FILE is used as given. Otherwise the first candidate
+    that exists wins: beside the health file, the shared directory, then the
+    container and host canonical paths. A missing explicit path is not replaced.
+    """
     explicit = os.environ.get("GB_DEPTH_SCALE_FILE")
     if explicit:
         return os.path.expanduser(explicit)
-    return os.path.join(shared_dir(), "depth_scale_record.json")
+    health = os.environ.get("HEALTH_FILE") or os.environ.get("GB_HEALTH_FILE") or "/home/ubuntu/shared/gb_safety/health.json"
+    candidates = []
+    for path in (
+        os.path.join(os.path.dirname(os.path.expanduser(health)), "depth_scale_record.json"),
+        os.path.join(shared_dir(), "depth_scale_record.json"),
+        "/home/ubuntu/shared/gb_safety/depth_scale_record.json",
+        "/home/pi/docker/tmp/gb_safety/depth_scale_record.json",
+    ):
+        if path not in candidates:
+            candidates.append(path)
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return candidates[0]
 
 
 def person_track_path():
