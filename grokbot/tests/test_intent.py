@@ -42,6 +42,33 @@ act = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.
 check("activation leaves MAINT and does not enable the observer or clap",
       "MAINT was left in place" in act and "gb-intent was not enabled" in act and "gb-clap was not enabled" in act
       and "release_own_deploy_hold" not in act)
+import gb_wally
+import gb_bounded
+said = gb_wally.handle("hey drive around the room and explore, stop when I tell you")
+check("the whole sentence is a 45 second look and not a halt",
+      said and "45 second" in said and "not a mapped explore" in said and "not moved" in said
+      and "does not make the look longer" in said and "halt" not in said.lower(), said)
+check("a generic later stop is not a lease and not a timed drive",
+      gb_intent.is_bounded_lease("stop when I tell you") is False
+      and gb_estop.parse_motion("drive forward until I say stop") is None
+      and gb_estop.stop_action("drive forward until I say stop", moving=True) is None)
+lease = gb_intent.open_lease(ask, 1000, 45)
+check("the lease ends at 45 seconds and is not indefinite",
+      lease["deadline"] == 1045 and lease["indefinite"] is False and lease["cap_s"] == 45 and lease["all_writer_pause"] is False)
+early = gb_intent.compare(lease, 1010, [{"node": "voice", "nz": True, "intent_id": lease["id"],
+                                        "odom_vx": 0, "odom_wz": 0, "odom_source": "command"}])
+check("inside the lease a zero command-derived odom does not prove a stop",
+      early["expected"] == "within_lease" and early["physical_stop_verified"] is False
+      and early["stall_unverified"] is True and early["hardware_interlock"] == "unknown")
+late = gb_intent.compare(lease, 1050, [{"node": "lidar_app", "topic": "/controller/cmd_vel", "nz": True,
+                                       "odom_vx": 0, "odom_wz": 0, "odom_source": "command"}])
+check("past the deadline a bypass is reported and not paused",
+      late["expected"] == "stop" and late["past_deadline"] is True and "lidar_app" in late["ran_past_deadline"]
+      and late["all_writer_pause"] is False and late["bypass_nonzero"] == ["lidar_app"])
+repair = gb_intent.repair_record(lease, late, "A stock publisher was still nonzero after the lease.")
+check("a repair record is not applied and has no velocity",
+      repair["applied"] is False and repair["approved"] is False and "lin" not in repair and repair["physical_stop_verified"] is False)
+check("the look cap stays 45", gb_bounded.CAP_S == 45.0)
 
 print("test_intent: %d passed, %d failed" % (OK, BAD))
 sys.exit(0 if BAD == 0 else 1)

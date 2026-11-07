@@ -456,6 +456,8 @@ _DEST = re.compile(r"\b(to (?:the|my|me|where|his|her|that|this)|home|charger|ki
 def parse_motion(text, speed_mult=1.0):
     """'go forward for 4 seconds' -> {"op":"timed","lin":+v,"dur":4,...}; 'reverse 90 degrees' -> {"op":"turn","deg":-90}.
     Returns None if this is not a simple timed drive/turn. Duration: default 3 s if none parsed, hard cap 10 s."""
+    if future_stop(text):
+        return None
     t = strip_leadins(text)                 # natural lead-ins / tails ("I want you to", "can you", "please", "now")
     t = re.sub(r"^" + _WAKE, "", t).strip()
     t = _POLITE.sub("", t).strip()

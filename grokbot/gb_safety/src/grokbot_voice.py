@@ -1799,8 +1799,12 @@ def voice_loop():
             if not text:
                 continue
             # KILL SWITCH FIRST: every transcript, wake word or not, awake or not
-            if gb_estop.announcement_echo(text, _recent_lines()) or gb_estop.future_stop(text):
-                log(f"ignored own announcement or a later stop condition: {text!r}")
+            if gb_estop.announcement_echo(text, _recent_lines()):
+                log(f"ignored own announcement: {text!r}")
+                continue
+            import gb_intent
+            if gb_estop.future_stop(text) and not gb_intent.is_bounded_lease(text):
+                log(f"ignored a later stop condition: {text!r}")
                 continue
             if gb_estop.stop_action(text, moving=_moving(), spoken_texts=_recent_lines()):
                 log(f"[ESTOP] stop heard (no wake word needed): {text!r}")
@@ -1832,6 +1836,8 @@ def voice_loop():
                 if not cmd or len(cmd) < 2:
                     speak(WAKE_ACK); awake_until = time.time() + WAIT_SPEECH_S + 4; followup = False
                     continue
+            elif gb_intent.is_bounded_lease(text):
+                cmd = text
             else:
                 continue                                  # not addressed to us
             HW_EVENT.clear(); awake_until = 0.0; followup = False

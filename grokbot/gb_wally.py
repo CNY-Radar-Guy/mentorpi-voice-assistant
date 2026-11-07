@@ -517,23 +517,35 @@ def handle(text, protections=None):
                     "It is not a surveyed position. Nav2 is not running. I have not seen the wheels move.")
         return ("I have not moved. There is no home pose from this boot unless a look is already running. "
                 "Nav2 is not running.")
-    if re.search(r"\b(explore|look around)\b", t):
+    if re.search(r"\b(explore|look around|drive around)\b", t):
         import gb_bounded
+        import gb_estop
+        import gb_intent
         bounded_look().request()
+        lease = gb_intent.open_lease(raw, time.time(), gb_bounded.CAP_S)
+        try:
+            gb_intent.write_status(gb_intent.compare(lease, lease["t"]))
+        except Exception:
+            pass
         sent = False
         if _runtime and _publisher is not None:
             try:
-                _publish({"op": "bounded", "cap": gb_bounded.CAP_S, "src": "voice"})
+                _publish({"op": "bounded", "cap": gb_bounded.CAP_S, "src": "voice", "intent_id": lease["id"]})
                 sent = True
             except Exception:
                 sent = False
+        later = ""
+        if gb_estop.future_stop(raw):
+            later = " Saying stop later still stops it. The phrase does not make the look longer than 45 seconds."
         if sent:
-            return ("I asked the gate for a 45 second odometry look, not a mapped explore. "
+            return ("I asked the gate for a 45 second odometry look, not a mapped explore."
+                    + later + " "
                     "It uses filtered /odom only, stops at the existing obstacle limits, and the return "
                     "has its own time and distance limit. Nav2 is not running. A restart will not resume it. "
                     "Leave the lidar app, line following, object tracking, and hand gesture idle. I do not switch those off. "
                     "I have not seen the wheels move.")
-        return ("I have not moved. Look around is a 45 second odometry look through the gate, not a mapped explore. "
+        return ("I have not moved. Look around is a 45 second odometry look through the gate, not a mapped explore."
+                + later + " "
                 "It uses filtered /odom only. Nav2 is not running, and a restart will not resume it. "
                 "Leave the lidar app, line following, object tracking, and hand gesture idle. I do not switch those off.")
     if re.search(r"\b(look for a person|acquire|find a person)\b", t):

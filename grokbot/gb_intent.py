@@ -23,6 +23,98 @@ def status_path():
     return "/home/pi/docker/tmp/gb_safety/intent_status.json"
 
 
+def is_bounded_lease(text):
+    """A room look with or without a later stop. Not a map mission and not an open-ended drive."""
+    t = " ".join((text or "").lower().split())
+    if not t or "map this room" in t:
+        return False
+    return ("look around" in t) or ("drive around" in t) or (" explore" in " " + t) or t.startswith("explore")
+
+
+def open_lease(text, now, cap_s=45.0):
+    """A fixed lease. The later phrase 'stop when I tell you' does not extend it."""
+    try:
+        cap = float(cap_s)
+    except (TypeError, ValueError):
+        cap = 45.0
+    cap = max(5.0, min(45.0, cap))
+    now = float(now)
+    return {
+        "id": "look-%d" % int(now * 1000),
+        "kind": "bounded_look",
+        "text": text,
+        "t": now,
+        "deadline": now + cap,
+        "cap_s": cap,
+        "indefinite": False,
+        "stop_when_told": True,
+        "approved": False,
+        "interlock": False,
+        "all_writer_pause": False,
+    }
+
+
+def compare(lease, now, observations=()):
+    """Expected behavior against what was observed. This does not publish a stop.
+
+    A zero command-derived odom twist does not prove the wheels stopped.
+    """
+    now = float(now)
+    past = now > float(lease["deadline"])
+    told = any(item.get("standalone_stop") for item in observations or ())
+    ran_past = []
+    bypass_nz = []
+    commanded = False
+    odom_zero = True
+    saw_odom = False
+    command_derived = False
+    for item in observations or ():
+        if item.get("nz"):
+            commanded = True
+            if past or told:
+                ran_past.append(item.get("node") or item.get("topic"))
+            if item.get("node") in BYPASSES:
+                bypass_nz.append(item.get("node"))
+        if "odom_vx" in item or "odom_wz" in item:
+            saw_odom = True
+            if abs(float(item.get("odom_vx") or 0)) > 1e-6 or abs(float(item.get("odom_wz") or 0)) > 1e-6:
+                odom_zero = False
+            if item.get("odom_source") == "command":
+                command_derived = True
+    return {
+        "expected": "stop" if past or told else "within_lease",
+        "past_deadline": past,
+        "stop_when_told": bool(told),
+        "ran_past_deadline": ran_past,
+        "all_writer_pause": False,
+        "pause_reason": "stock publishers are not paused; this compare does not stop them",
+        "bypass_nonzero": bypass_nz,
+        "physical_stop_verified": False,
+        "stall_unverified": bool(commanded and saw_odom and odom_zero and command_derived),
+        "hardware_interlock": "unknown",
+        "wheel_feedback": False,
+        "indefinite": False,
+        "interlock": False,
+        "partial": True,
+    }
+
+
+def repair_record(lease, comparison, explanation):
+    """An advisory note a person can accept later. Nothing is applied."""
+    return {
+        "lease_id": lease.get("id"),
+        "explanation": explanation,
+        "approved": False,
+        "applied": False,
+        "interlock": False,
+        "all_writer_pause": False,
+        "physical_stop_verified": False,
+        "hardware_interlock": "unknown",
+        "expected": comparison.get("expected"),
+        "past_deadline": comparison.get("past_deadline"),
+    }
+
+
 def note(kind, text, approved=False):
     """Remember one request. approved False means a person has not accepted a repair."""
     return {
