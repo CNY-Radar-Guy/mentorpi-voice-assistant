@@ -132,6 +132,7 @@ check("a saved look does not resume", again.active is False and again.requested 
 gb_wally.set_autonomy(False)
 said = gb_wally.handle("look around")
 check("asking does not claim the wheels moved", "not moved" in said and "Nav2" in said and "gate" in said and "not a mapped explore" in said, said)
+check("the look names the other command publishers and does not disable them", "lidar app" in said and "do not switch those off" in said, said)
 check("look around does not arm autonomy", gb_wally._autonomy is False)
 mapped = gb_wally.handle("map this room")
 check("map this room does not start a drive", "not moved" in mapped and "not a mapped explore" in mapped, mapped)

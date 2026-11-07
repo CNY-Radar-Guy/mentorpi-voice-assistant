@@ -1,5 +1,15 @@
-"""Measured-defect checks. No robot, no systemd, and no port 8080."""
+"""Measured-defect checks. No robot, no systemd, and no port 8080.
+
+The depth checks use a missing scale file. A validated record on the Pi is not
+this case, and this file does not read it.
+"""
 import json, os, struct, sys, tempfile, threading, time
+_iso = tempfile.mkdtemp(prefix="gblivefix_")
+os.environ["GB_DEPTH_SCALE_FILE"] = os.path.join(_iso, "missing-depth-scale.json")
+os.environ["HEALTH_FILE"] = os.path.join(_iso, "health.json")
+os.environ["GB_HEALTH_FILE"] = os.environ["HEALTH_FILE"]
+os.environ["GB_SHARED_DIR"] = _iso
+os.environ["GB_DATA"] = os.path.join(_iso, "data")
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -69,6 +79,25 @@ check("topic online does not make the metric valid", rec["depth_topic_online"] i
 check("the record is still not a motion command", rec["executable"] is False and rec["tf_applied"] is False)
 good = gb_health_node.record(10, 0.9, "mono16", [980], 0.98, topic_online=True, nonzero_frac=0.67, forward_raw=980)
 check("a matching forward ray is the calibration", good["depth_metric_valid"] is True and good["depth_unit"] == "crosscheck_mm", good)
+fixture = os.path.join(_iso, "depth_scale_record.json")
+base = 1_700_000_000.0
+samples = []
+for i, raw in enumerate((2225, 2230, 2237)):
+    err = (raw * 0.001 - 2.2098) / 2.2098
+    samples.append({"raw_median": raw, "conf": (0.805, 0.808, 0.811)[i], "people": 1,
+                    "rgb_capture_t": base + i * 0.2, "depth_capture_t": base + i * 0.2, "error": err})
+json.dump({
+    "scale_m_per_count": 0.001,
+    "provenance": {"tape": "7ft_to_feet", "feet_closer_than_torso_m": 0.0762, "reference_m": 2.2098, "landmark": "torso"},
+    "camera": {"width": 640, "height": 400, "encoding": "mono16", "align_mode": True, "depth_correction": True,
+               "rgb_frame_id": "rgb_camera_link", "depth_frame_id": "depth_camera_link"},
+    "samples": samples,
+}, open(fixture, "w"))
+os.environ["GB_DEPTH_SCALE_FILE"] = fixture
+documented = gb_health_node.record(10, 0.9, "mono16", [1689], 0.98, topic_online=True, nonzero_frac=0.67, forward_raw=1689)
+check("a fixture record is the unit, and the live Pi file is not required",
+      documented["depth_unit"] == "documented_mm" and documented["depth_scale_record_path"] == fixture, documented)
+os.environ["GB_DEPTH_SCALE_FILE"] = os.path.join(_iso, "missing-depth-scale.json")
 
 # --- wake file round-trip ---
 live = "\n".join([

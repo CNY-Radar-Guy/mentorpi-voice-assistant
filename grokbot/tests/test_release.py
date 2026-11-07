@@ -1,5 +1,11 @@
 """Versioned release and activation rollback. No robot and no systemd."""
 import os, sys, tempfile
+_iso = tempfile.mkdtemp(prefix="gbrelease_")
+os.environ["GB_DEPTH_SCALE_FILE"] = os.path.join(_iso, "missing-depth-scale.json")
+os.environ["HEALTH_FILE"] = os.path.join(_iso, "health.json")
+os.environ["GB_HEALTH_FILE"] = os.environ["HEALTH_FILE"]
+os.environ["GB_SHARED_DIR"] = _iso
+os.environ["GB_DATA"] = os.path.join(_iso, "data")
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, ROOT)

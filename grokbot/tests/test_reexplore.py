@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""test_reexplore.py - camera-primary fusion + explore recovery wiring (no motors)."""
+"""test_reexplore.py - camera-primary fusion + explore recovery wiring (no motors).
+
+This reads the tree that contains the test. /home/pi/grokbot is the installed
+copy and is not a substitute. OBS_TILT_DEG in the shell is not the source default.
+"""
 import math, os, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE) if os.path.basename(HERE) == "tests" else HERE
-# Prefer installed tree when present
-for cand in ("/home/pi/grokbot", ROOT, os.path.join(ROOT, "sim")):
-    if os.path.exists(os.path.join(cand, "gb_obstacle.py")): ROOT = cand; break
+for key in ("OBS_TILT_DEG", "OBS_TILT_HARD_DEG", "OBS_STOP_FWD", "OBS_STOP_REV", "OBS_SWEEP_R",
+            "OBS_JOLT", "OBS_SLOW_FULL", "OBS_V_MIN", "OBS_V_DEGRADED"):
+    os.environ.pop(key, None)
 sys.path.insert(0, ROOT)
 import gb_obstacle as OB
 OK = BAD = 0
@@ -31,7 +35,8 @@ check("DEPTH_HMAX >= 0.40", OB.DEPTH_HMAX >= 0.40 - 1e-9, OB.DEPTH_HMAX)
 check("STOP_FWD ~0.27", abs(OB.STOP_FWD - 0.27) < 1e-6, OB.STOP_FWD)
 check("SLOW_FULL ~0.70", abs(OB.SLOW_FULL - 0.70) < 1e-6, OB.SLOW_FULL)
 check("JOLT >= 7", OB.JOLT >= 6.9, OB.JOLT)
-check("soft tilt 15", abs(OB.TILT_DEG - 15.0) < 0.2, OB.TILT_DEG)
+check("soft tilt 15 is the source default", abs(OB.TILT_DEG - 15.0) < 0.2 and "OBS_TILT_DEG" not in os.environ, OB.TILT_DEG)
+check("the file under test is this tree", os.path.realpath(OB.__file__).startswith(os.path.realpath(ROOT)), OB.__file__)
 check("hard tilt 25", abs(OB.TILT_HARD - 25) < 1e-6, OB.TILT_HARD)
 check("SWEEP_R >= 0.24", OB.SWEEP_R >= 0.24 - 1e-9, OB.SWEEP_R)
 

@@ -531,9 +531,11 @@ def handle(text, protections=None):
             return ("I asked the gate for a 45 second odometry look, not a mapped explore. "
                     "It uses filtered /odom only, stops at the existing obstacle limits, and the return "
                     "has its own time and distance limit. Nav2 is not running. A restart will not resume it. "
+                    "Leave the lidar app, line following, object tracking, and hand gesture idle. I do not switch those off. "
                     "I have not seen the wheels move.")
         return ("I have not moved. Look around is a 45 second odometry look through the gate, not a mapped explore. "
-                "It uses filtered /odom only. Nav2 is not running, and a restart will not resume it.")
+                "It uses filtered /odom only. Nav2 is not running, and a restart will not resume it. "
+                "Leave the lidar app, line following, object tracking, and hand gesture idle. I do not switch those off.")
     if re.search(r"\b(look for a person|acquire|find a person)\b", t):
         _follow_demand_mode("acquire")
         return "I am looking for a person. Autonomy is unchanged and I am not moving."
