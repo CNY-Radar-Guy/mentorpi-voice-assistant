@@ -524,7 +524,7 @@ def handle(text, protections=None):
         bounded_look().request()
         lease = gb_intent.open_lease(raw, time.time(), gb_bounded.CAP_S)
         try:
-            gb_intent.write_status(gb_intent.compare(lease, lease["t"]))
+            gb_intent.write_status({"lease": lease, "compare": gb_intent.compare(lease, lease["t"]), "interlock": False})
         except Exception:
             pass
         sent = False
@@ -535,8 +535,10 @@ def handle(text, protections=None):
             except Exception:
                 sent = False
         later = ""
-        if gb_estop.future_stop(raw):
-            later = " Saying stop later still stops it. The phrase does not make the look longer than 45 seconds."
+        if lease.get("condition_kind") == "place":
+            later = " I stored the place condition. I cannot detect that place, so it does not extend the look and it is not enforced."
+        elif lease.get("condition_kind") == "told":
+            later = " I stored the later condition. A bare stop later still ends it. The phrase does not make the look longer than 45 seconds."
         if sent:
             return ("I asked the gate for a 45 second odometry look, not a mapped explore."
                     + later + " "

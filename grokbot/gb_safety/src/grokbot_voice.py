@@ -1804,7 +1804,16 @@ def voice_loop():
                 continue
             import gb_intent
             if gb_estop.future_stop(text) and not gb_intent.is_bounded_lease(text):
-                log(f"ignored a later stop condition: {text!r}")
+                pending = gb_intent.pending_condition(text, time.time())
+                if pending:
+                    try:
+                        gb_intent.write_status(pending)
+                    except Exception as ex:
+                        log("condition store failed:", ex)
+                    log(f"stored a later stop condition without moving: {pending.get('condition')!r}")
+                    speak("I stored that later condition. I am not moving, and I have no look running. I cannot detect a place.")
+                else:
+                    log(f"ignored a later stop condition: {text!r}")
                 continue
             if gb_estop.stop_action(text, moving=_moving(), spoken_texts=_recent_lines()):
                 log(f"[ESTOP] stop heard (no wake word needed): {text!r}")

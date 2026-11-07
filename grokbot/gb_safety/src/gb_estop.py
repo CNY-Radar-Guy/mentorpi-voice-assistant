@@ -304,15 +304,28 @@ def standalone_stop(text):
     return bool(_STRONG.match(t) and len(t.split()) <= 6)
 
 
+def future_condition(text):
+    """The later-stop clause, or None. A bare stop is not a clause."""
+    if standalone_stop(text) or persistent_emergency(text):
+        return None
+    t = _norm(text)
+    if not t or drive_then_stop(t):
+        return None
+    place = re.search(r"\b((?:stop|halt|freeze) at [a-z0-9 ]{1,40})", t)
+    if place:
+        return " ".join(place.group(1).split())
+    timed = re.search(r"\b((?:stop|halt|freeze) (?:when|if|after|until|once)\b.{0,48})", t)
+    if timed:
+        return " ".join(timed.group(1).split())
+    earlier = re.search(r"\b((?:when|if|after|until|once)\b.{0,48}\b(?:stop|halt|freeze)\b)", t)
+    if earlier:
+        return " ".join(earlier.group(1).split())
+    return None
+
+
 def future_stop(text):
     """The word stop names a later condition. It is not a command to stop now."""
-    if standalone_stop(text) or persistent_emergency(text):
-        return False
-    t = _norm(text)
-    if drive_then_stop(t):
-        return False
-    return bool(re.search(r"\b(?:stop|halt|freeze)\b.{0,48}\b(?:when|if|after|until|once)\b"
-                          r"|\b(?:when|if|after|until|once)\b.{0,48}\b(?:stop|halt|freeze)\b", t))
+    return future_condition(text) is not None
 
 
 def announcement_echo(text, spoken_texts):

@@ -32,13 +32,22 @@ def is_bounded_lease(text):
 
 
 def open_lease(text, now, cap_s=45.0):
-    """A fixed lease. The later phrase 'stop when I tell you' does not extend it."""
+    """A fixed lease. A later stop clause is stored and does not extend the lease.
+
+    'stop when I tell you' is kept as a told-stop. 'stop at the door' is kept
+    as a place clause and is not enforced: there is no place detector.
+    """
     try:
         cap = float(cap_s)
     except (TypeError, ValueError):
         cap = 45.0
     cap = max(5.0, min(45.0, cap))
     now = float(now)
+    import gb_estop
+    clause = gb_estop.future_condition(text)
+    kind = None
+    if clause:
+        kind = "place" if " at " in (" " + clause) else "told"
     return {
         "id": "look-%d" % int(now * 1000),
         "kind": "bounded_look",
@@ -47,8 +56,32 @@ def open_lease(text, now, cap_s=45.0):
         "deadline": now + cap,
         "cap_s": cap,
         "indefinite": False,
-        "stop_when_told": True,
+        "stop_when_told": kind == "told" or clause is None,
+        "condition": clause,
+        "condition_kind": kind,
+        "condition_enforced": False if kind == "place" else bool(kind == "told"),
         "approved": False,
+        "interlock": False,
+        "all_writer_pause": False,
+    }
+
+
+def pending_condition(text, now):
+    """Store a later stop when no look was asked. Does not move."""
+    import gb_estop
+    clause = gb_estop.future_condition(text)
+    if not clause:
+        return None
+    kind = "place" if " at " in (" " + clause) else "told"
+    return {
+        "kind": "pending_condition",
+        "text": text,
+        "t": float(now),
+        "condition": clause,
+        "condition_kind": kind,
+        "condition_enforced": False if kind == "place" else True,
+        "motion": False,
+        "indefinite": False,
         "interlock": False,
         "all_writer_pause": False,
     }

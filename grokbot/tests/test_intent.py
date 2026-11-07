@@ -69,6 +69,31 @@ repair = gb_intent.repair_record(lease, late, "A stock publisher was still nonze
 check("a repair record is not applied and has no velocity",
       repair["applied"] is False and repair["approved"] is False and "lin" not in repair and repair["physical_stop_verified"] is False)
 check("the look cap stays 45", gb_bounded.CAP_S == 45.0)
+door = "explore the room and stop at the door"
+check("stop at the door is stored and is not a halt",
+      gb_estop.future_condition(door) == "stop at the door" and gb_estop.stop_action(door, moving=True) is None)
+placed = gb_intent.open_lease(door, 2000, 90)
+check("a place clause stays inside 45 seconds and is not enforced",
+      placed["condition"] == "stop at the door" and placed["condition_kind"] == "place"
+      and placed["condition_enforced"] is False and placed["cap_s"] == 45 and placed["indefinite"] is False)
+pending = gb_intent.pending_condition("stop at the door", 5)
+check("a place clause with no look does not move",
+      pending["motion"] is False and pending["condition"] == "stop at the door" and pending["condition_enforced"] is False)
+import gb_motor_cap as cap
+check("half rps is half the documented command corner",
+      abs(cap.half_rps() - cap.peak_rps() / 2) < 1e-12 and abs(cap.peak_rps() - cap.mps_to_rps(cap.track_mps(0.2, 0.5))) < 1e-12)
+clamped = cap.clamp_motors([(1, 5.0), (2, -5.0), (3, 0.1), (4, -0.2)])
+check("each track is clamped in both directions",
+      clamped and all(abs(r) <= cap.half_rps() + 1e-12 for _i, r in clamped) and clamped[0][1] > 0 and clamped[1][1] < 0)
+check("a nonfinite motor command is rejected", cap.clamp_motors([(1, float("nan"))]) is None and cap.clamp_motors([(1, float("inf"))]) is None)
+check("a malformed motor command is rejected", cap.clamp_motors([(9, 0.1)]) is None and cap.clamp_motors("fast") is None)
+cfg = os.path.join(os.environ["GB_SHARED_DIR"], "motor_cap.json")
+cap.write_config(cfg)
+saved = cap.read_config(cfg)
+check("the saved cap matches the derivation and is not a firmware rating",
+      saved and saved["firmware_cap"] is False and saved["serial_bypass"] is True and saved["enforced_on_robot"] is False)
+loose = dict(saved); loose["half_rps"] = saved["half_rps"] * 2
+check("a looser saved cap is rejected", cap.config_ok(loose) is False)
 
 print("test_intent: %d passed, %d failed" % (OK, BAD))
 sys.exit(0 if BAD == 0 else 1)
