@@ -1,0 +1,27 @@
+[Unit]
+Description=Wally exploration session logger (read-only taps; no motion, no tuning)
+Documentation=file:///home/pi/grokbot/learn/README.md
+After=network-online.target
+# Independent of voice/gate/explore. Do not order against those units.
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/grokbot/learn
+ExecStart=/usr/bin/python3 /home/pi/grokbot/learn/session_logger.py --loop
+Restart=on-failure
+RestartSec=15
+Nice=19
+IOSchedulingClass=idle
+IOSchedulingPriority=7
+CPUQuota=15%
+MemoryMax=80M
+TasksMax=20
+# stdout goes to the journal and the logger also appends data/learn/session_logger.log
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

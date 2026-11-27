@@ -1,0 +1,19 @@
+[Unit]
+Description=Grok Bot LiDAR obstacle guard (MentorPi, runs in docker container as ubuntu)
+After=docker.service network-online.target
+Wants=docker.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/grokbot
+EnvironmentFile=/home/pi/grokbot/guard.env
+ExecStart=/bin/bash /home/pi/grokbot/gb_guard_run.sh
+ExecStopPost=-/usr/bin/docker exec -u ubuntu MentorPi pkill -INT -f /home/ubuntu/shared/gb_guard/gb_guard.py
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

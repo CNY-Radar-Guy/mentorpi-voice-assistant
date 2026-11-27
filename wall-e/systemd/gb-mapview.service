@@ -1,0 +1,24 @@
+[Unit]
+Description=Wall-E live LiDAR and occupancy map viewer (read-only, no motion)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/grokbot
+Environment=PYTHONUNBUFFERED=1
+Environment=MAPVIEW_BIND=0.0.0.0
+Environment=MAPVIEW_PORT=8095
+Environment=MAPVIEW_ROSBRIDGE=ws://127.0.0.1:9090
+ExecStart=/home/pi/grokbot/venv/bin/python /home/pi/grokbot/tools/mapview_server.py
+Restart=always
+RestartSec=2
+Nice=10
+
+# Hardened: this service only serves HTTP and subscribes via rosbridge.
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

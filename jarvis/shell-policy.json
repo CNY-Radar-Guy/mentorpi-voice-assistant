@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "description": "Editable guardrail policy for Jarvis's local shell agent. Loaded from D:\\AI-Models\\jarvis\\shell-policy.json. Bound to 127.0.0.1 only. John can add allowlisted domains or tune timeouts here; restart Jarvis to reload.",
+  "bind": "127.0.0.1",
+  "timeouts": {
+    "read_only_ms": 15000,
+    "cad_ms": 180000,
+    "mutating_ms": 300000
+  },
+  "output_cap_bytes": 16384,
+  "approval_ttl_ms": 600000,
+  "download_dirs": [
+    "%USERPROFILE%\\Downloads",
+    "D:\\AI-Models\\jarvis\\downloads"
+  ],
+  "safe_cad_dirs": [
+    "%USERPROFILE%\\Desktop",
+    "%USERPROFILE%\\Documents",
+    "%USERPROFILE%\\Downloads",
+    "D:\\AI-Models",
+    "%TEMP%"
+  ],
+  "allowed_domains": [
+    "github.com",
+    "objects.githubusercontent.com",
+    "bambulab.com",
+    "download.microsoft.com",
+    "aka.ms",
+    "ollama.com",
+    "python.org",
+    "nodejs.org",
+    "git-scm.com",
+    "mozilla.org",
+    "videolan.org",
+    "7-zip.org",
+    "notepad-plus-plus.org"
+  ],
+  "tier1_commands": [
+    "hostname",
+    "whoami",
+    "Get-Date",
+    "Get-ComputerInfo",
+    "Get-Process",
+    "Get-Service",
+    "Get-Volume",
+    "Get-PSDrive",
+    "Get-ChildItem",
+    "dir",
+    "ls",
+    "Test-Path",
+    "where.exe",
+    "winget list",
+    "winget search",
+    "nvidia-smi",
+    "ollama list",
+    "ipconfig",
+    "Test-NetConnection",
+    "Get-ItemProperty",
+    "echo",
+    "Write-Output",
+    "openscad",
+    "openscad.com",
+    "openscad.exe",
+    "bambu-studio",
+    "bambu-studio.exe"
+  ],
+  "safe_pipes": [
+    "Select-Object",
+    "Select",
+    "Format-Table",
+    "FT",
+    "Format-List",
+    "FL",
+    "Measure-Object",
+    "Measure"
+  ],
+  "uninstall_property_paths": [
+    "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+    "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+    "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
+  ]
+}

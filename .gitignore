@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.bak*
+*.log
+*.pid
+*.wav
+*.mp3
+*.onnx
+.env
+*.env
+!*.env.example
+secrets*
+data/
+node_modules/

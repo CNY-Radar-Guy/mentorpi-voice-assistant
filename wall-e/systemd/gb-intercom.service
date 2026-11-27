@@ -1,0 +1,18 @@
+[Unit]
+Description=Wall-E two-way intercom for Jarvis (audio only: shared gbmic + speaker; never arms or moves)
+After=network-online.target sound.target grokbot.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+SupplementaryGroups=audio
+Environment=PYTHONUNBUFFERED=1 HOME=/home/pi GB_DATA=/home/pi/grokbot/data
+Environment=INTERCOM_PORT=8791 INTERCOM_ALLOW=192.168.50.30,127.0.0.1
+ExecStart=/usr/bin/python3 /home/pi/grokbot/intercom/gb_intercom.py
+Restart=always
+RestartSec=3
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target

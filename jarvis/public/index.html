@@ -1,0 +1,1898 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jarvis</title>
+<link rel="icon" href="/jarvis.png">
+<style>
+:root{--bg:#0a0b0f;--panel:#12141a;--panel2:#171a21;--line:rgba(255,255,255,.07);--line2:rgba(255,255,255,.12);--text:#e7e9ee;--dim:#8b90a0;--faint:#5c6170;--accent:#7c9cff;--good:#3ddc97;--warn:#f5b748;--bad:#ff5c6c;--r:14px}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:radial-gradient(1200px 700px at 50% -10%,rgba(124,156,255,.08),transparent 60%),var(--bg);color:var(--text);font:14px/1.5 "Segoe UI Variable Text","Segoe UI",Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;cursor:pointer}
+.app{display:grid;grid-template-rows:52px 1fr;height:100vh}
+header{display:flex;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid var(--line);background:rgba(10,11,15,.7);backdrop-filter:blur(12px)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:.2px}
+.brand img{width:22px;height:22px;border-radius:6px}
+.brand small{color:var(--faint);font-weight:400}
+.seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px;margin-left:10px}
+.seg button{background:none;border:0;padding:4px 12px;border-radius:7px;color:var(--dim);font-size:13px}
+.seg button.on{background:var(--panel2);color:var(--text);box-shadow:0 1px 0 rgba(255,255,255,.05) inset,0 1px 3px rgba(0,0,0,.4)}
+.spacer{flex:1}
+.tog{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--dim);background:none;border:1px solid transparent;padding:5px 9px;border-radius:9px}
+.tog:hover{background:var(--panel);border-color:var(--line)}
+.tog .sw{width:26px;height:15px;border-radius:9px;background:#2a2e38;position:relative;transition:.2s}
+.tog .sw:after{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;background:#9aa0ad;transition:.2s}
+.tog.on .sw{background:var(--accent)}.tog.on .sw:after{left:13px;background:#fff}
+main{display:grid;grid-template-columns:var(--jarvis-left-col,290px) 1fr var(--jarvis-right-col,320px);gap:14px;padding:14px;min-height:0}
+.col{display:flex;flex-direction:column;gap:14px;min-height:0}
+.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:var(--r);box-shadow:0 10px 30px rgba(0,0,0,.25);transition:opacity .4s,filter .4s;min-height:0}
+.card h3{margin:0;padding:12px 14px 8px;font-size:11.5px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.9px;display:flex;align-items:center;justify-content:space-between}
+.card h3 span{font-weight:400;text-transform:none;letter-spacing:0;color:var(--faint)}
+.rows{padding:2px 6px 8px}
+.row{display:grid;grid-template-columns:12px 1fr auto;align-items:center;gap:10px;padding:7px 8px;border-radius:9px}
+.row:hover{background:rgba(255,255,255,.025)}
+.row .k{color:var(--text)}.row .v{color:var(--dim);font-variant-numeric:tabular-nums;font-size:12.5px;text-align:right}
+.row .sub{grid-column:2/4;color:var(--faint);font-size:11.5px;margin-top:-6px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.dot.g{background:var(--good);box-shadow:0 0 8px rgba(61,220,151,.6)}.dot.y{background:var(--warn);box-shadow:0 0 8px rgba(245,183,72,.5)}.dot.r{background:var(--bad);box-shadow:0 0 8px rgba(255,92,108,.6)}
+.bar{grid-column:2/4;height:3px;background:#22252e;border-radius:3px;overflow:hidden;margin-top:-4px}.bar i{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width .6s}
+.center{display:flex;flex-direction:column;min-height:0}
+.stage{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;padding:18px 0 6px}
+.core-wrap{position:relative;width:180px;height:180px;display:grid;place-items:center}
+.core{width:96px;height:96px;border-radius:50%;background:radial-gradient(circle at 50% 45%,#fff 0%,#dfe7ff 12%,var(--accent) 40%,rgba(124,156,255,.15) 70%,transparent 72%);box-shadow:0 0 40px 6px rgba(124,156,255,.45),0 0 120px 30px rgba(124,156,255,.15);transform:scale(calc(1 + var(--lvl,0)*.12));transition:transform .12s ease-out;animation:breathe 5s ease-in-out infinite}
+.ring{position:absolute;inset:16px;border-radius:50%;border:1px solid rgba(124,156,255,.25);animation:spin 18s linear infinite}
+.ring:before{content:"";position:absolute;top:-3px;left:50%;width:6px;height:6px;margin-left:-3px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
+.ring.r2{inset:0;border-color:rgba(124,156,255,.1);animation-duration:30s;animation-direction:reverse}
+.speaking .core{animation:speak 1.1s ease-in-out infinite}.speaking .ring{border-color:rgba(124,156,255,.5)}
+.thinking .ring{animation-duration:2.5s;border-style:dashed}
+@keyframes breathe{0%,100%{filter:brightness(.92)}50%{filter:brightness(1.1)}}
+@keyframes speak{0%,100%{box-shadow:0 0 40px 6px rgba(124,156,255,.45),0 0 120px 30px rgba(124,156,255,.15)}50%{box-shadow:0 0 60px 14px rgba(124,156,255,.7),0 0 160px 50px rgba(124,156,255,.25)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.state{margin-top:6px;font-size:12px;color:var(--faint);height:18px}
+.answer{max-width:680px;text-align:center;font-size:17px;line-height:1.55;color:var(--text);padding:6px 24px 0;min-height:52px}
+.answer .caret{display:inline-block;width:7px;height:17px;background:var(--accent);vertical-align:-3px;margin-left:2px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.log{flex:1;overflow:auto;padding:10px 6px 10px;display:flex;flex-direction:column;gap:10px;margin-top:10px;mask-image:linear-gradient(transparent,#000 24px)}
+.msg{max-width:82%;padding:9px 13px;border-radius:12px;font-size:13.5px;white-space:pre-wrap;word-wrap:break-word}
+.msg.u{align-self:flex-end;background:#1c2130;border:1px solid var(--line)}
+.msg.a{align-self:flex-start;background:var(--panel);border:1px solid var(--line);color:#d5d8e0}
+.msg .meta{display:block;color:var(--faint);font-size:11px;margin-top:4px}
+.msg.err{border-color:rgba(255,92,108,.4);color:#ffb3bb}
+.act{align-self:stretch;border:1px solid var(--line2);background:var(--panel2);border-radius:12px;padding:12px 14px}
+.act .t{font-weight:600;font-size:13px;display:flex;gap:8px;align-items:center}
+.act .d{color:var(--dim);font-size:12.5px;margin:4px 0 10px;word-break:break-all}
+.btns{display:flex;gap:8px}
+.btn{border:1px solid var(--line2);background:#1b1f28;border-radius:9px;padding:6px 12px;font-size:12.5px}
+.btn:hover{background:#222734}.btn.p{background:var(--accent);border-color:transparent;color:#0b0d14;font-weight:600}.btn.p:hover{filter:brightness(1.08)}
+.btn:disabled{opacity:.45;cursor:default}.btn.good{color:var(--good);border-color:rgba(61,220,151,.4)}.btn.bad{color:var(--bad);border-color:rgba(255,92,108,.45)}
+.diff{font:12px/1.45 "Cascadia Code",Consolas,monospace;background:#0c0e13;border:1px solid var(--line);border-radius:9px;padding:8px 0;max-height:260px;overflow:auto;margin:6px 0 10px}
+.diff div{padding:0 10px;white-space:pre}.diff .p{background:rgba(61,220,151,.1);color:#8ff0c3}.diff .m{background:rgba(255,92,108,.1);color:#ff9aa5}.diff .s{color:var(--faint);font-style:italic}.diff .f{color:var(--dim);padding:2px 10px 4px;font-weight:600}
+.cmd{display:flex;gap:8px;align-items:center;margin:8px auto 0;width:100%;max-width:760px;background:var(--panel2);border:1px solid var(--line2);border-radius:14px;padding:6px 6px 6px 14px;box-shadow:0 8px 30px rgba(0,0,0,.35)}
+.cmd:focus-within{border-color:rgba(124,156,255,.5);box-shadow:0 0 0 3px rgba(124,156,255,.12),0 8px 30px rgba(0,0,0,.35)}
+.cmd input{flex:1;background:none;border:0;outline:0;color:var(--text);font-size:14.5px;padding:8px 0}
+.cmd .mode{font-size:11px;color:var(--accent);border:1px solid rgba(124,156,255,.35);padding:2px 7px;border-radius:6px}
+.icon-btn{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:#1b1f28;display:grid;place-items:center}
+.icon-btn.on{background:var(--accent);color:#0b0d14}
+.icon-btn svg{width:16px;height:16px}
+.mic-mode{flex:0 0 auto;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--line);background:#1b1f28;color:var(--dim);font-size:11px;white-space:nowrap}
+.mic-mode:hover{border-color:var(--line2);color:var(--text)}
+.mic-mode:not(.momentary){color:var(--accent);border-color:rgba(124,156,255,.35)}
+#mic.on{box-shadow:0 0 0 3px rgba(124,156,255,.28)}
+#mic.listening{animation:micPulse 1.6s ease-in-out infinite}
+@keyframes micPulse{0%,100%{box-shadow:0 0 0 3px rgba(124,156,255,.25)}50%{box-shadow:0 0 0 7px rgba(124,156,255,.4)}}
+.quick{display:flex;flex-wrap:wrap;gap:8px;padding:4px 14px 14px}
+.chip{border:1px solid var(--line2);background:#181b23;border-radius:999px;padding:6px 12px;font-size:12.5px;color:#cfd3dc}
+.chip:hover{background:#202430;border-color:rgba(124,156,255,.4)}
+.chip.c{border-style:dashed}
+.witem{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:9px 10px;margin:0 6px;border-radius:10px}
+.witem:hover{background:rgba(255,255,255,.025)}
+.witem .tx{font-size:13px}.witem.approved .tx{text-decoration:line-through;color:var(--faint)}.witem.later .tx{color:var(--dim)}
+.witem .tag{font-size:10.5px;color:var(--faint);display:block}
+.witem .b{display:flex;gap:6px}.witem .b button{font-size:11.5px;padding:4px 9px;border-radius:7px;border:1px solid var(--line2);background:#1b1f28}
+.witem .b button.ok{color:var(--good)}
+.addw{display:flex;gap:6px;padding:6px 14px 12px}.addw input{flex:1;background:#0f1116;border:1px solid var(--line);border-radius:9px;color:var(--text);padding:6px 10px;font-size:12.5px;outline:0}
+.hist{padding:0 8px 10px;font-size:12px;overflow:auto;max-height:240px}
+.hist .h{padding:7px 8px;border-radius:8px;color:var(--dim)}.hist .h b{color:var(--text);font-weight:500}.hist .h.undone{opacity:.5}
+.scroll{overflow:auto;min-height:0}
+.hidden{display:none!important}
+body.focus .side .card{opacity:.28;filter:saturate(.3)}body.focus .side .card:hover{opacity:.9;filter:none}
+body.focus .core{animation-duration:9s}body.focus .ring{animation-duration:60s}body.focus .ring.r2{display:none}
+body.focus{background:var(--bg)}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1d212b;border:1px solid var(--line2);padding:8px 14px;border-radius:10px;font-size:12.5px;opacity:0;transition:.3s;pointer-events:none}.toast.show{opacity:1}
+#splash{position:fixed;inset:0;background:var(--bg);display:grid;place-items:center;z-index:9;transition:opacity .5s}
+#splash div{display:flex;flex-direction:column;align-items:center;gap:12px;color:var(--dim);font-size:13px}
+#splash img{width:56px;height:56px;border-radius:14px;animation:breathe 1.5s ease-in-out infinite}
+
+.tabs{display:flex;gap:2px;background:#0f1116;border:1px solid var(--line);border-radius:8px;padding:2px;text-transform:none;letter-spacing:0}
+.tabs button{background:none;border:0;padding:2px 9px;border-radius:6px;font-size:11.5px;color:var(--dim)}.tabs button.on{background:var(--panel2);color:var(--text)}
+.spark{grid-column:2/4;height:22px;width:100%;display:block;margin-top:-2px}
+.spark path.l{fill:none;stroke:var(--accent);stroke-width:1.4;stroke-linejoin:round;stroke-linecap:round}.spark path.a{fill:url(#sg);stroke:none}
+.spark.alt path.l{stroke:#a78bfa}
+.bot{padding:8px 10px;border-radius:9px}.bot:hover{background:rgba(255,255,255,.025)}
+.bot .n{display:flex;justify-content:space-between;align-items:center;gap:8px}.bot .n b{font-weight:500}
+.bot .r{color:var(--faint);font-size:11.5px;margin-top:2px}
+.pill{font-size:10.5px;padding:1px 7px;border-radius:999px;border:1px solid var(--line2);color:var(--dim)}.pill.g{color:var(--good);border-color:rgba(61,220,151,.3)}.pill.y{color:var(--warn);border-color:rgba(245,183,72,.3)}
+.mods{display:flex;flex-wrap:wrap;gap:5px;padding:4px 10px 10px}.mods span{font:11px "Cascadia Code",Consolas,monospace;background:#0f1116;border:1px solid var(--line);border-radius:6px;padding:2px 6px;color:#c3c8d4;cursor:default}
+.note{color:var(--faint);font-size:11.5px;padding:2px 10px 8px}
+.kbd{font:11px "Segoe UI",system-ui;color:var(--dim);border:1px solid var(--line2);background:var(--panel);border-radius:8px;padding:4px 9px;display:flex;gap:6px;align-items:center}
+.kbd:hover{color:var(--text);border-color:rgba(124,156,255,.4)}.kbd kbd{font:inherit;background:#1d212b;border:1px solid var(--line2);border-radius:4px;padding:0 4px}
+#pal{position:fixed;inset:0;background:rgba(5,6,9,.55);backdrop-filter:blur(6px);display:none;z-index:8;align-items:flex-start;justify-content:center;padding-top:14vh}
+#pal.show{display:flex}
+.pbox{width:560px;max-width:92vw;background:linear-gradient(180deg,#191c24,#13151b);border:1px solid var(--line2);border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.6);overflow:hidden;animation:pin .14s ease-out}
+@keyframes pin{from{transform:translateY(-6px) scale(.98);opacity:0}}
+.pbox input{width:100%;background:none;border:0;border-bottom:1px solid var(--line);outline:0;color:var(--text);font-size:15px;padding:15px 18px}
+.plist{max-height:340px;overflow:auto;padding:6px}
+.pi{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-radius:9px;font-size:13.5px;cursor:pointer}
+.pi small{color:var(--faint);font-size:11.5px}.pi.sel{background:rgba(124,156,255,.14)}.pi mark{background:none;color:var(--accent);font-weight:600}
+.pfoot{display:flex;gap:14px;padding:8px 16px;border-top:1px solid var(--line);color:var(--faint);font-size:11px}
+::-webkit-scrollbar{width:8px}::-webkit-scrollbar-thumb{background:#252935;border-radius:8px}
+@media (max-width:1100px){main{grid-template-columns:250px 1fr}.right{display:none}}
+
+.shell-ind{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);background:none;border:1px solid var(--line);padding:4px 9px;border-radius:9px;white-space:nowrap}
+.shell-ind:hover{background:var(--panel);border-color:var(--line2);color:var(--text)}
+.shell-ind .dot{width:7px;height:7px}
+.tools{margin-top:8px;border:1px solid var(--line);border-radius:9px;background:#0f1116;font-size:12px;text-align:left}
+.tools summary{cursor:pointer;padding:6px 10px;color:var(--dim);user-select:none;list-style:none}
+.tools summary::-webkit-details-marker{display:none}
+.tools summary:before{content:"▸ ";color:var(--faint)}
+.tools[open] summary:before{content:"▾ "}
+.tools .tr{padding:6px 10px 8px;border-top:1px solid var(--line)}
+.tools .tr b{font-weight:600;color:var(--text)}
+.tools .st{font-size:11px;margin-left:6px}
+.tools .st.ok{color:var(--good)}.tools .st.block{color:var(--bad)}.tools .st.wait{color:var(--warn)}
+.tools pre{margin:6px 0 0;white-space:pre-wrap;word-break:break-word;color:#c3c8d4;font:11.5px/1.4 "Cascadia Code",Consolas,monospace;max-height:160px;overflow:auto}
+#auditBox{position:fixed;inset:0;background:rgba(5,6,9,.55);backdrop-filter:blur(6px);display:none;z-index:8;align-items:flex-start;justify-content:center;padding-top:12vh}
+#auditBox.show{display:flex}
+.abox{width:640px;max-width:92vw;max-height:70vh;display:flex;flex-direction:column;background:linear-gradient(180deg,#191c24,#13151b);border:1px solid var(--line2);border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.6);overflow:hidden}
+.abox .ah{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);font-size:13px}
+.abox .ap{padding:8px 16px;color:var(--faint);font-size:11.5px;word-break:break-all}
+.abox .al{overflow:auto;padding:6px 10px 14px;font:11.5px/1.45 "Cascadia Code",Consolas,monospace;color:#c3c8d4}
+.abox .ae{padding:7px 8px;border-radius:8px;border:1px solid var(--line);margin:0 0 6px;background:#0f1116;white-space:pre-wrap;word-break:break-word}
+.abox .ae b{color:var(--text);font-weight:600}
+
+#pRobot,#pWally{flex:0 0 auto}
+#pRobot .robot-body{padding:2px 14px 12px}
+.robot-top{display:flex;align-items:center;gap:12px}
+.robot-pct{font-size:28px;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-.6px;line-height:1}
+.robot-pct small{font-size:13px;font-weight:500;color:var(--dim);margin-left:1px}
+.robot-lines{font-size:12.5px;color:var(--dim);line-height:1.35}
+.robot-lines b{color:var(--text);font-weight:600}
+.robot-err{color:var(--bad);font-size:12.5px;margin:6px 0 0}
+.wally-batt-log{margin-top:6px;font-size:11.5px;color:var(--dim);line-height:1.4}
+.wally-batt-alert{margin:8px 0 0;padding:8px 10px;border-radius:10px;border:1px solid rgba(245,183,72,.4);background:rgba(245,183,72,.12);color:var(--warn);font-size:12.5px;line-height:1.4}
+.wally-batt-alert b{color:var(--text);font-weight:650}
+.robot-btns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}
+.robot-btns .btn{padding:6px 8px;font-size:12px;width:100%}
+.robot-note{margin-top:8px;font-size:11.5px;color:var(--dim);line-height:1.4;white-space:pre-wrap}
+.robot-updated{font-size:11px;color:var(--faint);font-weight:400;text-transform:none;letter-spacing:0}
+
+#pWally .robot-body{padding:2px 14px 12px}
+.wally-diag{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:11.5px;color:var(--dim);line-height:1.45}
+.wally-diag b{color:var(--text);font-weight:600}
+.wally-svcs{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.wally-svcs span{font-size:10.5px;border:1px solid var(--line2);border-radius:999px;padding:1px 7px;color:var(--dim)}
+.wally-svcs span.g{color:var(--good);border-color:rgba(61,220,151,.3)}
+.wally-svcs span.r{color:var(--bad);border-color:rgba(255,92,108,.35)}
+.wally-btns{grid-template-columns:1fr 1fr}
+#pWallyMap{flex:1;display:flex;flex-direction:column;min-height:0}
+.wally-map-col{display:flex;flex-direction:column;min-height:0}
+#pWallyMap .wally-map-frame-wrap{position:relative;flex:1;display:flex;flex-direction:column;min-height:280px;margin:0 10px 10px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#0c0e13}
+#pWallyMap .wally-map-iframe-slot{position:relative;flex:1;min-height:180px}
+#wallyMapFrame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#0c0e13}
+.wally-map-offline{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:18px;background:rgba(10,11,15,.82);color:var(--dim);font-size:13px;z-index:1}
+.wally-map-offline.hidden{display:none!important}
+#pWallyMap h3 .wally-map-tools{display:flex;gap:6px;align-items:center}
+#pWallyMap h3 .btn{padding:3px 9px;font-size:11.5px}
+
+.wally-yolo-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 10px 8px;min-height:24px}
+.wally-yolo-meta{font-size:11px;color:var(--dim);white-space:nowrap}
+.wally-yolo-meta b{color:var(--text);font-weight:600}
+.wally-yolo-chips{display:flex;flex-wrap:wrap;gap:4px;flex:1;min-width:0}
+.wally-yolo-chip{font-size:10.5px;border:1px solid var(--line2);border-radius:999px;padding:1px 7px;color:var(--text);background:#161920}
+.wally-yolo-chip .c{color:var(--dim);margin-left:3px}
+.wally-yolo-chip.off{color:var(--dim)}
+#wallyYoloOverlayBtn.on{color:var(--accent);border-color:rgba(124,156,255,.4)}
+#pWallyMap .wally-map-iframe-slot{position:relative;flex:1;min-height:180px}
+#pWallyMap .wally-map-frame-wrap{display:flex;flex-direction:column}
+.wally-yolo-stream-wrap{display:none;position:relative;flex:0 0 38%;min-height:120px;border-top:1px solid var(--line);background:#000}
+#pWallyMap .wally-map-frame-wrap.yolo-on .wally-yolo-stream-wrap{display:block}
+.wally-yolo-stream-wrap img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;opacity:.95}
+.wally-yolo-stream-caption{position:absolute;left:8px;top:6px;z-index:1;font-size:10px;color:rgba(243,241,234,.9);background:rgba(10,11,15,.55);border-radius:6px;padding:1px 6px;pointer-events:none}
+body.wally-map-on main{grid-template-columns:var(--jarvis-left-col,290px) 1fr var(--jarvis-right-col,320px) var(--jarvis-vision-col,460px)}
+body.wally-map-off .wally-map-col{display:none}
+body.focus .wally-map-col .card{opacity:.28;filter:saturate(.3)}
+body.focus .wally-map-col .card:hover{opacity:.9;filter:none}
+@media (max-width:1100px){body.wally-map-on main{grid-template-columns:var(--jarvis-left-col,250px) 1fr}body.wally-map-on .wally-map-col{position:fixed;right:12px;top:64px;bottom:12px;width:min(var(--jarvis-vision-col,460px),46vw);z-index:5;display:flex}}
+@media (min-width:1101px) and (max-width:1640px){body.wally-map-on main{grid-template-columns:var(--jarvis-left-col,250px) 1fr var(--jarvis-right-col,300px) var(--jarvis-vision-col,400px)}}
+#pWallyMap{max-height:calc(100vh - 76px)}
+#pWallyMap.sized{flex:0 0 var(--jarvis-vision-h);height:var(--jarvis-vision-h);max-height:calc(100vh - 76px)}
+
+.wally-drive{display:flex;align-items:center;gap:8px;margin:0 10px 8px;padding:5px 8px;border:1px solid var(--line);border-radius:10px;background:#0c0e13;flex:0 0 auto;min-height:0}
+.wally-drive-meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.wally-drive-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.wally-drive-toggle{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:2px;flex:0 0 auto}
+.wally-drive-toggle button{background:none;border:0;padding:2px 8px;border-radius:7px;color:var(--dim);font-size:11px}
+.wally-drive-toggle button.on{background:var(--panel2);color:var(--text);box-shadow:0 1px 0 rgba(255,255,255,.05) inset}
+.wally-drive-badge{font-size:10px;border:1px solid var(--line2);border-radius:999px;padding:1px 7px;color:var(--dim);white-space:nowrap}
+.wally-drive-badge.good{color:var(--good);border-color:rgba(61,220,151,.35)}
+.wally-drive-badge.warn{color:var(--warn);border-color:rgba(245,183,72,.4)}
+.wally-drive-badge.bad{color:var(--bad);border-color:rgba(255,92,108,.4)}
+.wally-drive-speed{display:flex;align-items:center;gap:5px;flex:1 1 110px;min-width:108px;max-width:170px;font-size:10px;color:var(--dim);margin:0}
+.wally-drive-speed input[type=range]{flex:1;min-width:64px;height:14px;margin:0;accent-color:var(--accent);cursor:pointer}
+.wally-drive-speed-val{font-variant-numeric:tabular-nums;color:var(--text);font-size:10px;white-space:nowrap;min-width:4.7em}
+.wally-drive-hint{font-size:10px;color:var(--faint);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wally-dpad{display:grid;grid-template-columns:34px 34px 34px;grid-template-rows:34px 34px 34px;gap:4px;flex:0 0 auto}
+.wally-dpad button{width:34px;height:34px;padding:0;border:1px solid var(--line2);background:#1b1f28;border-radius:8px;color:var(--text);font-size:13px;line-height:1;display:grid;place-items:center;user-select:none;-webkit-user-select:none;touch-action:none}
+.wally-dpad button:hover{background:#222734}
+.wally-dpad button.held{border-color:rgba(124,156,255,.55);box-shadow:0 0 0 2px rgba(124,156,255,.18);background:#242a38}
+.wally-dpad .fwd-left{grid-area:1/1}
+.wally-dpad .fwd{grid-area:1/2}
+.wally-dpad .fwd-right{grid-area:1/3}
+.wally-dpad .left{grid-area:2/1}
+.wally-dpad .stop{grid-area:2/2;background:rgba(255,92,108,.16);border-color:rgba(255,92,108,.45);color:#ffb3bb;font-size:8.5px;font-weight:700;letter-spacing:.4px}
+.wally-dpad .stop:hover{background:rgba(255,92,108,.28)}
+.wally-dpad .right{grid-area:2/3}
+.wally-dpad .back-left{grid-area:3/1}
+.wally-dpad .back{grid-area:3/2}
+.wally-dpad .back-right{grid-area:3/3}
+.wally-dpad .diag{font-size:15px;color:var(--dim)}
+.wally-dpad .diag.held{color:var(--text)}
+.wally-drive.kbd-mode .wally-dpad button:not(.stop){opacity:.35;pointer-events:none}
+.wally-drive.manual-off .wally-dpad button:not(.stop){opacity:.35;pointer-events:none}
+.wally-drive:focus{outline:none}
+.wally-drive:focus-visible,.wally-drive.kb-focus{box-shadow:0 0 0 2px rgba(124,156,255,.35)}
+
+.wally-yolo-hits{position:absolute;inset:0;z-index:2;pointer-events:none}
+.wally-yolo-hit{position:absolute;pointer-events:auto;border:1px solid transparent;background:transparent;border-radius:3px;cursor:pointer;box-sizing:border-box;padding:0;margin:0;overflow:visible}
+.wally-yolo-hit:hover,.wally-yolo-hit.on{border-color:rgba(124,156,255,.9);background:rgba(124,156,255,.14);box-shadow:0 0 0 1px rgba(124,156,255,.3)}
+.wally-yolo-pill{position:absolute;left:0;top:0;max-width:100%;box-sizing:border-box;padding:1px 5px;border-radius:3px 3px 0 0;background:rgba(16,18,24,.82);color:#fff;font-size:10px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.wally-yolo-hit.corrected .wally-yolo-pill{background:rgba(124,156,255,.92);color:#0c0e13}
+.wally-yolo-pop{position:fixed;z-index:60;min-width:228px;max-width:286px;padding:10px;border:1px solid var(--line2);border-radius:10px;background:#161920;box-shadow:0 14px 32px rgba(0,0,0,.5);color:var(--text)}
+.wally-yolo-pop .ylab{font-size:12px;margin:0 0 8px;color:var(--dim);line-height:1.35}
+.wally-yolo-pop .ylab b{color:var(--text);font-weight:600}
+.wally-yolo-pop input{width:100%;background:#0c0e13;border:1px solid var(--line2);border-radius:8px;color:var(--text);padding:5px 8px;font:inherit;font-size:12.5px}
+.wally-yolo-pop .ychips{display:flex;flex-wrap:wrap;gap:4px;margin:7px 0 9px}
+.wally-yolo-pop .ychip{font-size:10.5px;border:1px solid var(--line2);border-radius:999px;padding:1px 7px;background:#12141a;color:var(--text);cursor:pointer}
+.wally-yolo-pop .ychip:hover,.wally-yolo-pop .ychip.on{border-color:rgba(124,156,255,.5);color:var(--accent)}
+.wally-yolo-pop .yacts{display:flex;gap:6px;justify-content:flex-end}
+.wally-yolo-pop .yacts .btn{padding:4px 10px;font-size:11.5px}
+
+.wally-drive-status{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;pointer-events:none;user-select:none;-webkit-user-select:none}
+.wally-drive-status-label{font-size:9px;font-weight:700;letter-spacing:.55px;text-transform:uppercase;color:var(--faint);line-height:1}
+.wally-drive-badge{cursor:default}
+.wally-drive-armbtns{display:flex;align-items:center;gap:4px;flex:0 0 auto}
+.wally-drive-armbtns .btn{padding:3px 8px;font-size:11px;border-radius:8px}
+
+.col.side,.col.right,.wally-map-col{position:relative}
+.jarvis-rh{position:absolute;z-index:12;background:transparent;touch-action:none}
+.jarvis-rh.edge-w{left:-3px;top:16px;bottom:16px;width:8px;cursor:ew-resize}
+.jarvis-rh.edge-e{right:-3px;top:16px;bottom:16px;width:8px;cursor:ew-resize}
+.jarvis-rh.edge-s{left:16px;right:16px;bottom:-3px;height:8px;cursor:ns-resize}
+.jarvis-rh.corner{width:14px;height:14px}
+.jarvis-rh.corner.sw{left:-2px;bottom:-2px;cursor:nesw-resize}
+.jarvis-rh.corner.se{right:-2px;bottom:-2px;cursor:nwse-resize}
+.jarvis-rh i{display:block;position:absolute;pointer-events:none;opacity:.4;background:var(--accent);border-radius:1px}
+.jarvis-rh.edge-w i,.jarvis-rh.edge-e i{top:50%;width:2px;height:22px;margin-top:-11px;left:3px}
+.jarvis-rh.edge-s i{left:50%;height:2px;width:22px;margin-left:-11px;top:3px}
+.jarvis-rh.corner i{right:2px;bottom:2px;width:8px;height:8px;background:transparent;border-right:2px solid var(--accent);border-bottom:2px solid var(--accent);border-radius:0 0 2px 0;opacity:.5}
+.jarvis-rh.corner.sw i{left:2px;right:auto;border-right:0;border-left:2px solid var(--accent)}
+.jarvis-rh:hover i,.jarvis-rh.drag i{opacity:.95}
+body.resizing-panels{user-select:none;-webkit-user-select:none}
+body.resizing-panels.ew{cursor:ew-resize}
+body.resizing-panels.ns{cursor:ns-resize}
+body.resizing-panels.nesw{cursor:nesw-resize}
+body.resizing-panels.nwse{cursor:nwse-resize}
+
+/* 2026-11-27 layout: compact Jarvis chat column, Wall-E Vision takes the remaining width */
+body.wally-map-on main{grid-template-columns:var(--jarvis-left-col,290px) var(--jarvis-chat-col,340px) var(--jarvis-right-col,320px) minmax(420px,1fr)}
+@media (min-width:1101px) and (max-width:1640px){body.wally-map-on main{grid-template-columns:var(--jarvis-left-col,250px) var(--jarvis-chat-col,300px) var(--jarvis-right-col,300px) minmax(0,1fr)}}
+@media (max-width:1100px){body.wally-map-on main{grid-template-columns:var(--jarvis-left-col,250px) 1fr}}
+body.wally-map-on .center{min-width:0;position:relative}
+body.wally-map-on .core-wrap{transform:scale(.68);margin:-29px 0}
+body.wally-map-on .answer{font-size:15px;padding:4px 10px 0}
+body.wally-map-on .cmd{padding-left:10px;gap:6px}
+body.wally-map-on .cmd input{min-width:0}
+body.wally-map-on .wally-map-col{min-width:0}
+/* 2026-11-27 two-way intercom on the Wall-E control pad */
+.wally-drive{flex-wrap:wrap}
+.wally-ic{display:flex;flex-direction:column;gap:4px;flex:0 0 auto;padding:2px 8px;border-left:1px solid var(--line);border-right:1px solid var(--line);min-width:190px}
+.wally-ic-row{display:flex;align-items:center;gap:7px}
+.wally-ic-col{display:flex;flex-direction:column;gap:3px;min-width:0}
+.wally-ic-top{display:flex;align-items:center;gap:4px}
+.wally-ic-mic{width:42px;height:42px;border-radius:50%;border:1px solid var(--line2);background:#1b1f28;display:grid;place-items:center;flex:0 0 auto;padding:0;color:var(--dim);touch-action:none;user-select:none;-webkit-user-select:none;transition:box-shadow .12s,background .12s}
+.wally-ic-mic svg{width:19px;height:19px;pointer-events:none}
+.wally-ic-mic:hover{background:#222734}
+.wally-ic-mic.on{border-color:rgba(61,220,151,.55);box-shadow:0 0 0 2px rgba(61,220,151,.16);color:var(--good)}
+.wally-ic-mic.talk{border-color:rgba(245,183,72,.8);box-shadow:0 0 0 4px rgba(245,183,72,.22);color:var(--warn);background:#2a2416}
+.wally-ic-dir{font-size:10.5px;font-weight:600;border:1px solid var(--line2);border-radius:999px;padding:1px 8px;white-space:nowrap;color:var(--dim)}
+.wally-ic-dir.conn{color:var(--accent);border-color:rgba(124,156,255,.45)}
+.wally-ic-dir.listen{color:var(--good);border-color:rgba(61,220,151,.45)}
+.wally-ic-dir.talk{color:var(--warn);border-color:rgba(245,183,72,.6);background:rgba(245,183,72,.08)}
+.wally-ic-off{width:18px;height:18px;padding:0;border-radius:50%;border:1px solid var(--line2);background:#1b1f28;color:var(--dim);font-size:10px;line-height:1;display:grid;place-items:center}
+.wally-ic-off[hidden],.wally-ic-msg[hidden]{display:none}
+.wally-ic-off:hover{color:var(--bad);border-color:rgba(255,92,108,.5)}
+.wally-ic-meters{display:grid;grid-template-columns:auto 1fr;gap:3px 6px;align-items:center;font-size:9.5px;color:var(--faint)}
+.wally-ic-meter{position:relative;height:5px;border-radius:3px;background:#1b1f28;overflow:visible;min-width:90px}
+.wally-ic-meter i{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:3px;background:var(--good);transition:width .06s linear}
+#wallyIcMeterPc i{background:var(--warn)}
+.wally-ic-meter b{position:absolute;top:-2px;bottom:-2px;width:1px;background:rgba(255,255,255,.5)}
+.wally-ic-msg{font-size:10px;color:var(--bad);max-width:230px;line-height:1.25}
+</style>
+</head>
+<body class="wally-map-on">
+<div id="splash"><div><img src="/jarvis.png" alt=""><span>Jarvis · local</span></div></div>
+<div class="app">
+<header>
+  <div class="brand"><img src="/jarvis.png" alt=""> Jarvis <small id="modelName">qwen3:14b · local</small></div>
+  <div class="seg" id="modeSeg"><button data-m="chat" class="on">Chat</button><button data-m="program">Program</button></div>
+  <div class="spacer"></div>
+  <button class="shell-ind" id="shellInd" title="Guarded local shell agent, bound to 127.0.0.1. Click to view the audit log."><i class="dot g"></i><span id="shellIndLabel">Shell Agent: Guarded (localhost)</span></button>
+  <button class="kbd" id="palBtn" title="Command palette"><kbd>Ctrl</kbd><kbd>K</kbd></button>
+  <button class="tog" id="tWeb" title="Auto-authorize web requests until this window is closed. Default off."><span class="sw"></span>Web: authorize for session</button>
+  <button class="tog" id="tVoice" title="Speak answers aloud"><span class="sw"></span>Voice</button>
+  <button class="tog" id="tFocus" title="Dim panels, calm animation"><span class="sw"></span>Focus</button>
+  <button class="tog on" id="tWallyMap" title="Show the live Wall-E LiDAR and occupancy map"><span class="sw"></span>Wall-E map</button>
+</header>
+<main>
+  <section class="col side">
+    <div class="card scroll" id="pSystems"><h3><span class="tabs" id="sideTabs"><button data-t="sys" class="on">Systems</button><button data-t="bots">Bots</button></span><span id="sysTime">—</span></h3>
+      <div class="rows" id="sysRows"><div class="row"><i class="dot"></i><span class="k">Loading…</span></div></div>
+      <div class="rows hidden" id="botRows"></div></div>
+    <div class="card" id="pQuick"><h3>Quick commands</h3><div class="quick" id="quick"></div></div>
+  </section>
+  <section class="center">
+    <div class="stage" id="stage">
+      <div class="core-wrap"><div class="ring r2"></div><div class="ring"></div><div class="core" id="core"></div></div>
+      <div class="state" id="state">Ready</div>
+      <div class="answer" id="answer">Good to see you, John.</div>
+    </div>
+    <div class="log" id="log"></div>
+    <div class="cmd">
+      <span class="mode hidden" id="modeTag">PROGRAM</span>
+      <input id="input" placeholder="Ask Jarvis anything…  (try “add to waiting: …”, “search: …”, or Program mode)" autocomplete="off">
+      <button class="mic-mode" id="micMode" type="button" title="Continuous mic: stays on until you click the mic again. Click to switch to momentary (auto-off after one turn).">Mic: Toggle</button>
+      <button class="icon-btn" id="mic" title="Voice input (off by default). Edge/Chrome send audio to a cloud speech service."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+      <button class="icon-btn" id="send" title="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+    </div>
+  </section>
+  <section class="col side right">
+    <div class="card" id="pWally">
+      <h3>Wally <span class="robot-updated" id="wallyUpdated">—</span></h3>
+      <div class="robot-body">
+        <div class="robot-top">
+          <i class="dot" id="wallyDot"></i>
+          <div class="robot-pct" id="wallyBatt">—<small>%</small></div>
+          <div class="robot-lines" id="wallyLines">Loading live status…</div>
+        </div>
+        <div class="robot-err hidden" id="wallyErr"></div>
+        <div class="wally-batt-alert hidden" id="wallyBattAlert" role="status" aria-live="polite"></div>
+        <div class="wally-diag" id="wallyDiag">Loading sensors…</div>
+        <div class="wally-batt-log" id="wallyBattLog">Battery log starting…</div>
+        <div class="robot-btns wally-btns">
+          <button class="btn good" id="wallyArm" type="button">Arm</button>
+          <button class="btn" id="wallyDisarm" type="button">Disarm</button>
+          <button class="btn" id="wallyExploreStart" type="button">Start explore</button>
+          <button class="btn" id="wallyExploreStop" type="button">Stop explore</button>
+          <button class="btn" id="wallyMapStart" type="button">Start mapping</button>
+          <button class="btn" id="wallyMapStop" type="button">Stop mapping</button>
+          <button class="btn" id="wallyModeGround" type="button">Ground mode</button>
+          <button class="btn" id="wallyModeBench" type="button">Bench mode</button>
+          <button class="btn" id="wallyLiveMap" type="button">Live map</button>
+          <button class="btn" id="wallyRefresh" type="button">Refresh status</button>
+        </div>
+        <div class="robot-note" id="wallyNote">Arm, disarm, mode, mapping, and live map are available here. Start explore moves Wall-E and asks for confirmation first.</div>
+      </div>
+    </div>
+    <div class="card" id="pRobot">
+      <h3>Qrevo L <span class="robot-updated" id="robotUpdated">—</span></h3>
+      <div class="robot-body">
+        <div class="robot-top">
+          <i class="dot" id="robotDot"></i>
+          <div class="robot-pct" id="robotBatt">—<small>%</small></div>
+          <div class="robot-lines" id="robotLines">Loading live status…</div>
+        </div>
+        <div class="robot-err hidden" id="robotErr"></div>
+        <div class="robot-btns">
+          <button class="btn" id="robotMop" type="button">Start mop</button>
+          <button class="btn" id="robotVac" type="button">Start vacuum</button>
+          <button class="btn" id="robotDock" type="button">Send to dock</button>
+          <button class="btn" id="robotWatch" type="button">Watcher status</button>
+        </div>
+        <div class="robot-note" id="robotNote"></div>
+      </div>
+    </div>
+    <div class="card scroll" id="pWaiting"><h3>Waiting on you <span id="wCount"></span></h3><div id="wList"></div>
+      <div class="addw"><input id="wInput" placeholder="Add an item…"><button class="btn" id="wAdd">Add</button></div></div>
+    <div class="card" id="pHistory"><h3>Program history <span><button class="btn" id="undo" style="padding:3px 9px;font-size:11.5px">Undo last</button></span></h3><div class="hist" id="hist"></div></div>
+  </section>
+
+  <section class="col wally-map-col" id="wallyMapCol">
+    <div class="card" id="pWallyMap">
+      <h3>Wall-E Vision <span class="robot-updated" id="wallyMapStatus">Connecting…</span>
+        <span class="wally-map-tools">
+          <button class="btn" id="wallyYoloOverlayBtn" type="button" title="Show the annotated YOLO detection stream under the live 60/40 LiDAR + FPV map">YOLO Overlay</button>
+          <button class="btn" id="wallyMapReload" type="button">Reload</button>
+          <button class="btn" id="wallyPanelReset" type="button" title="Restore default Wall-E Vision and dashboard panel sizes">Reset size</button>
+          <button class="btn" id="wallyMapMin" type="button">Minimize</button>
+        </span>
+      </h3>
+      <div class="wally-yolo-bar" id="wallyYoloBar">
+        <div class="wally-yolo-meta" id="wallyYoloMeta">YOLO <b>—</b></div>
+        <div class="wally-yolo-chips" id="wallyYoloChips"><span class="wally-yolo-chip off">waiting…</span></div>
+      </div>
+      <div class="wally-map-frame-wrap" id="wallyMapFrameWrap">
+        <div class="wally-map-iframe-slot">
+          <iframe id="wallyMapFrame" src="http://192.168.50.125:8095/" title="Wall-E live LiDAR and occupancy map"></iframe>
+          <div class="wally-map-offline hidden" id="wallyMapOffline">Wall-E's live map is offline. Reconnecting…</div>
+        </div>
+        <div class="wally-yolo-stream-wrap" id="wallyYoloStreamWrap">
+          <img id="wallyYoloStream" alt="Annotated YOLO FPV detections" />
+          <div class="wally-yolo-hits" id="wallyYoloHits" hidden></div>
+          <div class="wally-yolo-stream-caption">YOLO overlay · click a box or its label to correct</div>
+        </div>
+      </div>
+      <div class="wally-drive" id="wallyDrive" tabindex="0" title="Wall-E manual drive. Hold a direction or a corner to move and turn; release stops immediately.">
+        <div class="wally-drive-meta">
+          <div class="wally-drive-row">
+            <div class="wally-drive-toggle" id="wallyDriveToggle" role="group" aria-label="Manual drive input mode">
+              <button type="button" id="wallyDrivePadMode" data-mode="pad" class="on">Pad</button>
+              <button type="button" id="wallyDriveKeyMode" data-mode="keyboard">Keyboard</button>
+            </div>
+            <span class="wally-drive-status" title="Arm and manual-drive status readout. This is not a button.">
+              <span class="wally-drive-status-label">Status</span>
+              <span class="wally-drive-badge warn" id="wallyDriveBadge" role="status" aria-live="polite">Disarmed</span>
+            </span>
+            <div class="wally-drive-armbtns" role="group" aria-label="Arm or disarm Wall-E">
+              <button type="button" class="btn good" id="wallyDriveArm" title="Arm Wall-E. He stays still until you start a motion command.">Arm</button>
+              <button type="button" class="btn bad" id="wallyDriveDisarm" title="Disarm Wall-E. Stops manual drive first if a key or pad direction is held.">Disarm</button>
+            </div>
+            <label class="wally-drive-speed" title="Manual drive speed. Creep 0.020 m/s up to a hard cap of 0.288 m/s. Turn rate scales with this setting.">
+              <span>Speed</span>
+              <input type="range" id="wallyDriveSpeed" min="0.02" max="0.288" step="0.002" value="0.08" aria-label="Manual drive speed in meters per second">
+              <span class="wally-drive-speed-val" id="wallyDriveSpeedVal">0.080 m/s</span>
+            </label>
+          </div>
+          <div class="wally-drive-hint" id="wallyDriveHint">Hold to drive · release stops. Manual drive stays off until Wall-E is armed and no explore mission is running.</div>
+        </div>
+        <div class="wally-ic" id="wallyIc" role="group" aria-label="Two-way intercom with Wall-E">
+          <div class="wally-ic-row">
+            <button type="button" class="wally-ic-mic" id="wallyIcMic" aria-pressed="false" aria-label="Intercom microphone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+            <div class="wally-ic-col">
+              <div class="wally-ic-top"><span class="wally-ic-dir" id="wallyIcDir" role="status" aria-live="polite">Intercom off</span><button type="button" class="wally-ic-off" id="wallyIcOff" title="Turn the intercom off (Wall-E goes back to normal listening)" hidden>✕</button></div>
+              <div class="wally-drive-toggle" id="wallyIcModeToggle" role="group" aria-label="Intercom switching mode">
+                <button type="button" data-icmode="auto" class="on" title="Auto voice-activity: click the mic once; speaking switches to Wall-E's speaker, ~0.9 s of silence switches back to Wall-E's mic">Auto-VAD</button>
+                <button type="button" data-icmode="ptt" title="Push-to-talk: hold the mic button to talk through Wall-E, release to listen through Wall-E's mic">PTT</button>
+              </div>
+            </div>
+          </div>
+          <div class="wally-ic-meters" title="Live audio levels. White tick = Auto-VAD speech threshold."><span>You →</span><div class="wally-ic-meter" id="wallyIcMeterPc"><i></i><b id="wallyIcThr"></b></div><span>← Wall-E</span><div class="wally-ic-meter" id="wallyIcMeterBot"><i></i></div></div>
+          <div class="wally-ic-msg" id="wallyIcMsg" role="alert" hidden></div>
+        </div>
+        <div class="wally-dpad" id="wallyDpad">
+          <button type="button" class="fwd-left diag" data-dir="forward-left" aria-label="Forward left" title="Forward + left">↖</button>
+          <button type="button" class="fwd" data-dir="forward" aria-label="Forward" title="Forward">▲</button>
+          <button type="button" class="fwd-right diag" data-dir="forward-right" aria-label="Forward right" title="Forward + right">↗</button>
+          <button type="button" class="left" data-dir="left" aria-label="Rotate left" title="Rotate left">◀</button>
+          <button type="button" class="stop" data-dir="stop" aria-label="Stop" title="Stop">STOP</button>
+          <button type="button" class="right" data-dir="right" aria-label="Rotate right" title="Rotate right">▶</button>
+          <button type="button" class="back-left diag" data-dir="back-left" aria-label="Backward left" title="Backward + left">↙</button>
+          <button type="button" class="back" data-dir="back" aria-label="Backward" title="Backward">▼</button>
+          <button type="button" class="back-right diag" data-dir="back-right" aria-label="Backward right" title="Backward + right">↘</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+</div>
+<div class="wally-yolo-pop" id="wallyYoloPop" hidden></div>
+<div class="toast" id="toast"></div>
+<svg width="0" height="0" style="position:absolute"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--accent);stop-opacity:.28"/><stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></linearGradient></defs></svg>
+<div id="auditBox"><div class="abox"><div class="ah"><span>Shell agent audit log</span><button class="btn" id="auditClose">Close</button></div><div class="ap" id="auditPath"></div><div class="al" id="auditList">Loading…</div></div></div>
+<div id="pal"><div class="pbox"><input id="palIn" placeholder="Type a command, or ask Jarvis…" autocomplete="off"><div class="plist" id="palList"></div>
+<div class="pfoot"><span>↑↓ select</span><span>Enter run</span><span>Esc close</span><span style="margin-left:auto">Unmatched text is sent to Jarvis</span></div></div></div>
+<script>
+const $=s=>document.querySelector(s), H={'Content-Type':'application/json','X-Jarvis':'1'};
+let CFG=null, CUSTOM=null, mode='chat', history=[], busy=false, webSession=false;
+const LS=k=>localStorage.getItem('jarvis.'+k), LSset=(k,v)=>localStorage.setItem('jarvis.'+k,v);
+let voiceOn=LS('voice')!==null?LS('voice')==='1':true, focusOn=LS('focus')==='1', micMode=LS('micMode')==='momentary'?'momentary':'toggle';
+let rec=null, micArmed=false, recActive=false, ignoreRec=false, micResumeTimer=0;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2600)}
+async function api(p,body){const r=await fetch(p,body?{method:'POST',headers:H,body:JSON.stringify(body)}:{});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j}
+
+// ---------- config ----------
+async function loadConfig(){
+  const j=await api('/api/config');CFG=j.config;CUSTOM=j.custom;
+  document.documentElement.style.setProperty('--accent',CFG.accent||'#7c9cff');
+  $('#modelName').textContent=`${CFG.model} · local`;
+  const P=CFG.panels||{};$('#pSystems').classList.toggle('hidden',P.systems===false);$('#pWaiting').classList.toggle('hidden',P.waiting===false);
+  $('#pQuick').classList.toggle('hidden',P.quick_commands===false);$('#pHistory').classList.toggle('hidden',P.history===false);
+  const q=$('#quick');q.innerHTML='';
+  (CFG.quick_commands||[]).forEach(c=>{const b=document.createElement('button');b.className='chip';b.textContent=c.label;b.onclick=()=>quick(c);q.appendChild(b)});
+  if(!(CFG.quick_commands||[]).some(c=>c.action==='coach')){const b=document.createElement('button');b.className='chip';b.textContent='Bot coach';b.onclick=()=>quick({label:'Bot coach',action:'coach'});q.appendChild(b)}
+  (CUSTOM.commands||[]).forEach(c=>{const b=document.createElement('button');b.className='chip c';b.textContent=c.label;b.title=c.prompt;b.onclick=()=>ask(c.prompt,{label:c.label});q.appendChild(b)});
+  if(!j.brave){$('#tWeb').title='Brave was not found on this PC; web pages will be read directly but cannot be opened in Brave.'}
+}
+function quick(c){
+  if(c.action==='focus'){setFocus(!focusOn);say(focusOn?'Focus mode on. I\'ll keep quiet, John.':'Focus mode off.');return}
+  if(c.action) return ask('',{action:c.action,label:c.label});
+  if(c.prompt) return ask(c.prompt,{label:c.label});
+}
+
+// ---------- systems ----------
+function row(dot,k,v,extra=''){return `<div class="row"><i class="dot ${dot}"></i><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span>${extra}</div>`}
+const bar=p=>`<div class="bar"><i style="width:${Math.max(0,Math.min(100,p||0))}%"></i></div>`;
+const HIST={gpu:[],vram:[],ram:[]};const pushH=(k,v)=>{if(v==null||isNaN(v))return;HIST[k].push(v);if(HIST[k].length>30)HIST[k].shift()};
+function spark(arr,alt){if(arr.length<2)return '';const W=200,Hh=22,n=arr.length;const pts=arr.map((v,i)=>[(i/(29))*W,Hh-1-(Math.max(0,Math.min(100,v))/100)*(Hh-3)]);
+  const off=W-pts[n-1][0];const P=pts.map(([x,y])=>[x+off,y]);const d='M'+P.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' L');
+  return `<svg class="spark${alt?' alt':''}" viewBox="0 0 ${W} ${Hh}" preserveAspectRatio="none"><path class="a" d="${d} L${W},${Hh} L${P[0][0].toFixed(1)},${Hh} Z"/><path class="l" d="${d}" vector-effect="non-scaling-stroke"/></svg>`}
+async function refreshStatus(){
+  try{const s=await api('/api/status');let h='';
+    if(s.gpu.ok){pushH('gpu',s.gpu.util_pct);pushH('vram',100*s.gpu.vram_used_mb/s.gpu.vram_total_mb)}pushH('ram',100*s.ram.used_gb/s.ram.total_gb);
+    const o=s.ollama;h+=row(o.up?'g':'r','Ollama',o.up?`v${o.version}`:'down',`<div class="sub">${o.up?(o.loaded.length?o.loaded.map(m=>`${m.name} · ${m.vram_gb} GB VRAM`).join(', '):'no model loaded'):esc(o.error||'')}</div>`);
+    const g=s.gpu;if(g.ok){const vp=Math.round(100*g.vram_used_mb/g.vram_total_mb);h+=row(g.temp_c>83?'r':g.temp_c>75?'y':'g','GPU',`${g.util_pct}% · ${g.temp_c}°C`,`<div class="sub">${esc(g.name.replace('NVIDIA GeForce ',''))} · VRAM ${(g.vram_used_mb/1024).toFixed(1)}/${(g.vram_total_mb/1024).toFixed(0)} GB${g.power_w?` · ${Math.round(g.power_w)} W`:''}</div>${spark(HIST.gpu)||bar(g.util_pct)}${spark(HIST.vram,true)||bar(vp)}`)}else h+=row('r','GPU','nvidia-smi failed');
+    h+=row(s.cpu.pct>90?'y':'g','CPU',`${s.cpu.pct??'—'}%`,bar(s.cpu.pct));
+    const rp=Math.round(100*s.ram.used_gb/s.ram.total_gb);h+=row(rp>90?'y':'g','Memory',`${s.ram.used_gb}/${s.ram.total_gb} GB`,spark(HIST.ram,true)||bar(rp));
+    s.disks.forEach(d=>{if(d.error)h+=row('r',`Drive ${d.drive}`,d.error);else{const up=Math.round(100*(1-d.free_gb/d.total_gb));h+=row(d.free_gb<20?'r':d.free_gb<60?'y':'g',`Drive ${d.drive}`,`${d.free_gb>=1000?(d.free_gb/1000).toFixed(2)+' TB':d.free_gb+' GB'} free`,bar(up))}});
+    const w=s.wally;h+=row(w.ping&&w.ssh_port_open?'g':w.ping||w.ssh_port_open?'y':'r','Wally (MentorPi)',w.ping?`${w.ping_ms??'<1'} ms`:'unreachable',`<div class="sub">${esc(w.ip)} · ping ${w.ping?'ok':'no reply'} · port 22 ${w.ssh_port_open?'open':'closed'} · reachability; live status is in the Wally panel</div>`);
+    const t=s.tailscale,tok=t.service==='RUNNING'&&t.backend==='Running';h+=row(tok?'g':t.service==='RUNNING'?'y':t.service==='NOT_INSTALLED'?'':'r','Tailscale',t.service==='RUNNING'?(t.backend==='Running'?'connected':t.backend==='NeedsLogin'?'needs login':(t.backend||'running').toLowerCase()):t.service.toLowerCase().replace('_',' '),`<div class="sub">service ${esc(t.service.toLowerCase())}${t.ip?' · '+esc(t.ip):''}</div>`);
+    $('#sysRows').innerHTML=h;$('#sysTime').textContent=new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'});
+  }catch(e){$('#sysRows').innerHTML=row('r','Jarvis server','offline');}
+}
+
+// ---------- waiting ----------
+async function refreshWaiting(){
+  const w=await api('/api/waiting');const open=w.items.filter(i=>i.status!=='approved').length;$('#wCount').textContent=open?`${open} open`:'all clear';
+  $('#wList').innerHTML=w.items.map(i=>`<div class="witem ${i.status}"><div class="tx">${esc(i.text)}${i.status!=='open'?`<span class="tag">${i.status==='approved'?'approved (local only)':'later'}</span>`:''}</div><div class="b">${i.status==='approved'?`<button data-op="reopen" data-id="${i.id}">Undo</button><button data-op="remove" data-id="${i.id}">✕</button>`:`<button class="ok" data-op="approve" data-id="${i.id}">Approve</button>${i.status==='open'?`<button data-op="later" data-id="${i.id}">Later</button>`:`<button data-op="reopen" data-id="${i.id}">Reopen</button>`}`}</div></div>`).join('')||'<div style="padding:8px 16px;color:var(--faint)">Nothing waiting.</div>';
+}
+$('#wList').onclick=async e=>{const b=e.target.closest('button[data-op]');if(!b)return;await api('/api/waiting',{op:b.dataset.op,id:b.dataset.id});refreshWaiting()};
+$('#wAdd').onclick=async()=>{const v=$('#wInput').value.trim();if(!v)return;await api('/api/waiting',{op:'add',text:v});$('#wInput').value='';refreshWaiting()};
+$('#wInput').onkeydown=e=>{if(e.key==='Enter')$('#wAdd').click()};
+
+// ---------- program history ----------
+async function refreshHistory(){
+  const j=await api('/api/program/history');
+  $('#hist').innerHTML=j.history.length?j.history.map(h=>`<div class="h ${h.undone?'undone':''}"><b>${esc(new Date(h.at).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))}</b> · ${esc(h.files.map(f=>f.file).join(', '))}${h.undone?' · undone':''}<br>${esc((h.summary||'').slice(0,140))}</div>`).join(''):'<div class="h">No changes yet. Switch to Program mode and describe a change.</div>';
+}
+$('#undo').onclick=async()=>{try{const j=await api('/api/program/undo',{});toast('Undone: '+j.undone.files.map(f=>f.file).join(', '));await loadConfig();refreshHistory();refreshWaiting();refreshBots()}catch(e){toast(e.message)}};
+
+// ---------- speech ----------
+let voices=[];function loadVoices(){voices=speechSynthesis.getVoices()}speechSynthesis.onvoiceschanged=loadVoices;loadVoices();
+function pickVoice(){const v=CFG&&CFG.voice||{};if(v.voice_name){const m=voices.find(x=>x.name.toLowerCase().includes(v.voice_name.toLowerCase()));if(m)return m}
+  const en=voices.filter(x=>/^en/i.test(x.lang));const pool=v.prefer_local_voice!==false?en.filter(x=>x.localService):en;
+  return pool.find(x=>/guy|ryan|david|george|mark/i.test(x.name))||pool[0]||en[0]||null}
+let speakQ=0;
+function speakChunk(text){
+  if(!voiceOn||!(CFG?.voice?.enabled!==false))return;const t=text.replace(/[*_#`>\[\]]/g,'').trim();if(!t)return;
+  const u=new SpeechSynthesisUtterance(t);const v=pickVoice();if(v)u.voice=v;u.rate=CFG?.voice?.rate||1;u.pitch=CFG?.voice?.pitch??.95;
+  u.onstart=()=>{speakQ++;$('#stage').classList.add('speaking');pauseMicForTts()};
+  u.onboundary=()=>{const c=$('#core');c.style.setProperty('--lvl',(.4+Math.random()*.6).toFixed(2));setTimeout(()=>c.style.setProperty('--lvl',0),140)};
+  u.onend=u.onerror=()=>{speakQ=Math.max(0,speakQ-1);if(!speechSynthesis.speaking&&!speechSynthesis.pending){$('#stage').classList.remove('speaking');scheduleMicResume()}};
+  speechSynthesis.speak(u);
+}
+function say(t){$('#answer').textContent=t;speakChunk(t)}
+function makeSpeaker(){let buf='';return{push(d){buf+=d;const m=buf.match(/^([\s\S]*[.!?…])\s+/);if(m){speakChunk(m[1]);buf=buf.slice(m[0].length)}},flush(){if(buf.trim())speakChunk(buf);buf=''}}}
+
+// ---------- chat ----------
+const logEl=$('#log');
+function addMsg(cls,html){const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;logEl.appendChild(d);logEl.scrollTop=logEl.scrollHeight;return d}
+function clean(t){return t.replace(/<think>[\s\S]*?<\/think>/g,'').replace(/<tool_call>[\s\S]*?<\/tool_call>/g,'').replace(/\[\[[^\]]*\]?\]?/g,'').trim()}
+async function streamTo(resp,onDelta,onStatus,onTool){
+  const rd=resp.body.getReader(),dec=new TextDecoder();let buf='',done=null;
+  for(;;){const {value,done:end}=await rd.read();if(end)break;buf+=dec.decode(value,{stream:true});let i;
+    while((i=buf.indexOf('\n'))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);if(!line.trim())continue;const j=JSON.parse(line);
+      if(j.t==='delta')onDelta(j.c);else if(j.t==='status')onStatus(j.c);else if(j.t==='tool'){onTool&&onTool(j)}else if(j.t==='reset'){onStatus&&onStatus('__reset__')}else if(j.t==='done')done=j;else if(j.t==='error')throw new Error(j.c)}}
+  return done;
+}
+function toolStatusLabel(s){return s==='executed'?'Executed':s==='blocked'?'Blocked by guardrail':s==='approval_required'?'Awaiting approval':s==='denied'?'Denied':s==='expired'?'Expired':(s||'')}
+function toolPanel(items){
+  if(!items||!items.length)return '';
+  const rows=items.map(t=>{
+    const st=t.status||'';
+    const cls=st==='executed'?'ok':st==='blocked'?'block':st==='approval_required'?'wait':'';
+    const body=[t.command?`<pre>${esc(t.command)}</pre>`:'', t.reason&&st!=='executed'?`<div class="st ${cls}">${esc(t.reason)}</div>`:'', t.output?`<pre>${esc(String(t.output).slice(0,4000))}</pre>`:''].join('');
+    return `<div class="tr"><b>${esc(t.tool||'tool')}</b><span class="st ${cls}">${esc(toolStatusLabel(st))}</span>${body}</div>`;
+  }).join('');
+  const summary=items.some(t=>t.status==='approval_required')?'Awaiting approval':items.some(t=>t.status==='blocked')?'Blocked by guardrail':'Executed';
+  return `<details class="tools"><summary>Tool activity · ${items.length} · ${esc(summary)}</summary>${rows}</details>`;
+}
+async function ask(text,opt={}){
+  if(busy)return toast('One moment, John.');const m=mode;busy=true;
+  ignoreRec=true;stopCapture();cancelSpeech();
+  $('#stage').classList.add('thinking');$('#state').textContent=m==='program'?'Drafting a change…':'Thinking…';
+  addMsg('u',esc(opt.label||text)+(m==='program'?'<span class="meta">Program mode</span>':''));
+  const ans=$('#answer');ans.innerHTML='<span class="caret"></span>';let full='';const sp=makeSpeaker();
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:H,body:JSON.stringify({message:text,mode:m,action:opt.action,history})});
+    if(!r.ok)throw new Error((await r.json()).error);
+    const tools=[];
+    const d=await streamTo(r,c=>{full+=c;const vis=clean(full);ans.innerHTML=esc(vis)+'<span class="caret"></span>';$('#stage').classList.remove('thinking');$('#state').textContent='Speaking';sp.push(c.replace(/\[\[[^\]]*\]?\]?/g,''))},s=>{if(s==='__reset__'){full='';ans.innerHTML='<span class="caret"></span>';return}$('#state').textContent=s},t=>{tools.push(t);$('#state').textContent=t.status==='approval_required'?'Awaiting approval…':t.status==='blocked'?'Blocked by guardrail':('Shell: '+(t.tool||'running')+'…')});
+    const final=clean(d?d.text:full)||'(no reply)';ans.textContent=final;if(!full)speakChunk(final);else sp.flush();
+    const allTools=(d&&d.tools&&d.tools.length)?d.tools:tools;
+    addMsg('a',esc(final)+toolPanel(allTools)+`<span class="meta">${d?`${(d.ms/1000).toFixed(1)} s`+(d.tok_s?` · ${d.tok_s} tok/s`:'')+` · ${esc(d.model)}`:''}</span>`);
+    history.push({role:'user',content:opt.action?`[${opt.label}]`:text},{role:'assistant',content:final});history=history.slice(-12);
+    for(const a of (d&&d.actions)||[]){if(a.type==='web')webCard(a);if(a.type==='proposal')proposalCard(a);if(a.type==='shell_approval')shellCard(a);if(a.type==='refresh_waiting')refreshWaiting()}
+  }catch(e){addMsg('a err',esc('Error: '+e.message));ans.textContent='Something went wrong, John. Details are in the log below.'}
+  finally{endTurn()}
+}
+function webCard(a){
+  const d=document.createElement('div');d.className='act';
+  d.innerHTML=`<div class="t">🌐 Web request — ${a.kind==='search'?'Brave search':'open page'}</div><div class="d">${esc(a.target)}</div><div class="btns"><button class="btn p">Authorize</button><button class="btn">Deny</button></div><div class="d" style="margin:8px 0 0;display:none"></div>`;
+  logEl.appendChild(d);logEl.scrollTop=logEl.scrollHeight;const [ok,no]=d.querySelectorAll('button'),st=d.querySelectorAll('.d')[1];
+  const decide=async approve=>{ok.disabled=no.disabled=true;
+    if(!approve){await api('/api/web/decide',{id:a.id,approve:false});ok.textContent='Denied';return}
+    ok.textContent='Authorized';st.style.display='block';busy=true;ignoreRec=true;stopCapture();$('#stage').classList.add('thinking');const ans=$('#answer');ans.innerHTML='<span class="caret"></span>';let full='';const sp=makeSpeaker();
+    try{const r=await fetch('/api/web/decide',{method:'POST',headers:H,body:JSON.stringify({id:a.id,approve:true})});if(!r.ok)throw new Error((await r.json()).error);
+      const res=await streamTo(r,c=>{full+=c;ans.innerHTML=esc(clean(full))+'<span class="caret"></span>';$('#stage').classList.remove('thinking');sp.push(c)},s=>{st.textContent=s;$('#state').textContent=s});
+      sp.flush();const fin=clean(res?res.text:full);ans.textContent=fin;addMsg('a',esc(fin)+`<span class="meta">from ${esc(res?.source||a.target)} · via ${esc(res?.via||'')} · ${res?(res.ms/1000).toFixed(1)+' s':''}</span>`);
+      history.push({role:'assistant',content:fin});
+    }catch(e){st.textContent='Error: '+e.message;addMsg('a err',esc('Web error: '+e.message))}finally{endTurn()}};
+  ok.onclick=()=>decide(true);no.onclick=()=>decide(false);
+  if(webSession){st.style.display='block';st.textContent='Auto-authorized (session toggle is on)';decide(true)}
+}
+function proposalCard(a){
+  const d=document.createElement('div');d.className='act';
+  const diffs=Object.entries(a.files).map(([f,lines])=>`<div class="f">${esc(f)}</div>`+lines.map(l=>`<div class="${l.t==='+'?'p':l.t==='-'?'m':l.t==='…'?'s':''}">${esc((l.t==='…'?'  ':l.t+' ')+l.s)}</div>`).join('')).join('');
+  d.innerHTML=`<div class="t">✎ Proposed change to Jarvis</div><div class="d">${esc(a.summary)}</div><div class="diff">${diffs}</div><div class="btns"><button class="btn p">Approve &amp; apply</button><button class="btn">Reject</button></div>`;
+  logEl.appendChild(d);logEl.scrollTop=logEl.scrollHeight;const [ok,no]=d.querySelectorAll('button');
+  ok.onclick=async()=>{ok.disabled=no.disabled=true;try{await api('/api/program/decide',{id:a.id,approve:true});ok.textContent='Applied (backup saved)';await loadConfig();refreshHistory();refreshWaiting();refreshBots();say('Done, John. The change is live, and Undo is on the right if you regret it.')}catch(e){ok.textContent='Failed';toast(e.message)}};
+  no.onclick=async()=>{ok.disabled=no.disabled=true;await api('/api/program/decide',{id:a.id,approve:false});no.textContent='Rejected'};
+}
+function shellCard(a){
+  const d=document.createElement('div');d.className='act';
+  const bits=[a.command?`<div class="d"><code>${esc(a.command)}</code></div>`:'',a.reason?`<div class="d">${esc(a.reason)}</div>`:'',a.domain||a.vendor?`<div class="d">${esc([a.vendor,a.domain,a.dest].filter(Boolean).join(' · '))}</div>`:'',a.summary?`<div class="d">${esc(a.summary)}</div>`:''].join('');
+  d.innerHTML=`<div class="t">Shell agent — approval required</div>${bits}<div class="d">Guardrail: Tier 2 (click to approve). This will not run until you approve it.</div><div class="btns"><button class="btn p">Approve &amp; Run</button><button class="btn">Deny</button></div><div class="d" style="margin:8px 0 0;display:none"></div>`;
+  logEl.appendChild(d);logEl.scrollTop=logEl.scrollHeight;const [ok,no]=d.querySelectorAll('button'),st=d.querySelectorAll('.d')[d.querySelectorAll('.d').length-1];
+  no.onclick=async()=>{ok.disabled=no.disabled=true;try{await api('/api/shell-agent/deny',{approval_id:a.approval_id});no.textContent='Denied';st.style.display='block';st.textContent='Denied. Nothing was executed.'}catch(e){st.style.display='block';st.textContent=e.message}};
+  ok.onclick=async()=>{ok.disabled=no.disabled=true;ok.textContent='Running…';st.style.display='block';st.textContent='Running the approved command…';busy=true;ignoreRec=true;stopCapture();$('#stage').classList.add('thinking');const ans=$('#answer');ans.innerHTML='<span class="caret"></span>';let full='';const sp=makeSpeaker();const tools=[];
+    try{const r=await fetch('/api/shell-agent/approve',{method:'POST',headers:H,body:JSON.stringify({approval_id:a.approval_id})});if(!r.ok)throw new Error((await r.json()).error||('HTTP '+r.status));
+      const res=await streamTo(r,c=>{full+=c;ans.innerHTML=esc(clean(full))+'<span class="caret"></span>';$('#stage').classList.remove('thinking');sp.push(c)},s=>{st.textContent=s;$('#state').textContent=s},t=>tools.push(t));
+      sp.flush();const fin=clean(res?res.text:full)||'Done.';ans.textContent=fin;addMsg('a',esc(fin)+toolPanel((res&&res.tools)||tools)+`<span class="meta">approved shell action · ${res?(res.ms/1000).toFixed(1)+' s':''}</span>`);
+      history.push({role:'assistant',content:fin});ok.textContent='Approved & ran';
+    }catch(e){st.textContent='Error: '+e.message;addMsg('a err',esc('Shell agent error: '+e.message));ok.textContent='Failed'}
+    finally{endTurn()}};
+}
+
+async function openAudit(){
+  $('#auditBox').classList.add('show');
+  $('#auditPath').textContent='Loading…';$('#auditList').textContent='Loading…';
+  try{
+    const [st, aud]=await Promise.all([
+      fetch('/api/shell-agent/status').then(r=>r.json()),
+      fetch('/api/shell-agent/audit?limit=50').then(r=>r.json())
+    ]);
+    $('#shellIndLabel').textContent=st.label||'Shell Agent: Guarded (localhost)';
+    $('#auditPath').textContent=(aud.path||st.audit_log||'')+'  ·  policy: '+(st.policy_file||'');
+    const rows=(aud.entries||[]).slice().reverse();
+    $('#auditList').innerHTML=rows.length?rows.map(e=>`<div class="ae"><b>${esc((e.ts||'').replace('T',' ').replace('Z',''))} · ${esc(e.verdict||e.status||'')} · ${esc(e.tool||'')}</b>\n${esc(e.command||e.query||e.url||e.reason||'')}${e.exitCode!=null?'\nexit '+e.exitCode:''}${e.stdout?'\n'+esc(String(e.stdout).slice(0,500)):''}</div>`).join(''):'<div class="ae">No audit entries yet.</div>';
+  }catch(e){$('#auditList').textContent='Could not load audit log: '+e.message}
+}
+$('#shellInd').onclick=openAudit;$('#auditClose').onclick=()=>$('#auditBox').classList.remove('show');
+$('#auditBox').onclick=e=>{if(e.target.id==='auditBox')$('#auditBox').classList.remove('show')};
+
+// ---------- controls ----------
+function setMode(m){mode=m;document.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));$('#modeTag').classList.toggle('hidden',m!=='program');$('#input').placeholder=m==='program'?'Describe a change to Jarvis (persona, quick commands, panels, voice, waiting list)…':'Ask Jarvis anything…  (try “add to waiting: …”, “search: …”, or Program mode)'}
+$('#modeSeg').onclick=e=>{const b=e.target.closest('button');if(b)setMode(b.dataset.m)};
+function setTog(id,on){$(id).classList.toggle('on',on)}
+function setFocus(on){focusOn=on;LSset('focus',on?'1':'0');document.body.classList.toggle('focus',on);setTog('#tFocus',on)}
+$('#tFocus').onclick=()=>setFocus(!focusOn);
+$('#tVoice').onclick=()=>{voiceOn=!voiceOn;LSset('voice',voiceOn?'1':'0');setTog('#tVoice',voiceOn);if(!voiceOn){cancelSpeech();scheduleMicResume()}};
+$('#tWeb').onclick=()=>{webSession=!webSession;setTog('#tWeb',webSession);toast(webSession?'Web requests auto-authorized until you close Jarvis':'Web requests need your approval again')};
+const send=()=>{const v=$('#input').value.trim();if(!v)return;$('#input').value='';ask(v)};
+$('#send').onclick=send;$('#input').onkeydown=e=>{if(e.key==='Enter')send()};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){cancelSpeech();scheduleMicResume()}});
+// Voice input: opt-in only. Browser speech recognition (Edge/Chrome) sends audio to a cloud service.
+// Mic starts OFF on every page load (privacy). Mode is saved in localStorage (default: continuous toggle).
+const MIC_RESUME_MS=400;
+function isTtsActive(){return speakQ>0||speechSynthesis.speaking||speechSynthesis.pending}
+function cancelSpeech(){speechSynthesis.cancel();speakQ=0;$('#stage').classList.remove('speaking')}
+function setMicMode(mode){
+  const prev=micMode;
+  micMode=mode==='momentary'?'momentary':'toggle';
+  LSset('micMode',micMode);
+  const b=$('#micMode');
+  if(b){
+    b.textContent=micMode==='toggle'?'Mic: Toggle':'Mic: Momentary';
+    b.classList.toggle('momentary',micMode==='momentary');
+    b.title=micMode==='toggle'?'Continuous mic: stays on until you click the mic again. Click to switch to momentary (auto-off after one turn).':'Momentary mic: auto-off after one utterance. Click to switch to continuous toggle.';
+  }
+  if(prev==='toggle'&&micMode==='momentary'&&micArmed&&!recActive){
+    micArmed=false;clearTimeout(micResumeTimer);setMicUi();
+    if(!busy&&!isTtsActive())$('#state').textContent='Ready';
+  }
+}
+function setMicUi(){
+  const mic=$('#mic');
+  mic.classList.toggle('on',micArmed);
+  mic.classList.toggle('listening',micArmed&&recActive&&!ignoreRec);
+  mic.title=micArmed?(micMode==='toggle'?'Microphone on — click to turn it off':'Listening — will turn off after this turn'):'Voice input (off). Click to turn the microphone on. Edge/Chrome send audio to a cloud speech service.';
+}
+function stopCapture(){
+  ignoreRec=true;recActive=false;setMicUi();
+  try{rec&&rec.stop()}catch(e){}
+}
+function pauseMicForTts(){
+  if(!micArmed)return;
+  ignoreRec=true;stopCapture();
+}
+function scheduleMicResume(){
+  clearTimeout(micResumeTimer);
+  if(!micArmed||micMode==='momentary'){
+    if(!micArmed){recActive=false;setMicUi();if(!busy&&!isTtsActive())$('#state').textContent='Ready'}
+    return;
+  }
+  if(busy||isTtsActive())return;
+  micResumeTimer=setTimeout(()=>{
+    if(!micArmed||micMode==='momentary'||busy||isTtsActive())return;
+    ignoreRec=false;startCapture();
+  },MIC_RESUME_MS);
+}
+function endTurn(){
+  busy=false;$('#stage').classList.remove('thinking');
+  if(isTtsActive())$('#state').textContent='Speaking';
+  else{$('#state').textContent='Ready';scheduleMicResume()}
+}
+function startCapture(){
+  if(!micArmed||recActive||busy||isTtsActive())return;
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){micArmed=false;setMicUi();return toast('Voice input is not supported in this browser')}
+  ignoreRec=false;
+  const thisRec=new SR();rec=thisRec;
+  rec.lang='en-US';rec.interimResults=true;rec.continuous=false;
+  rec.onstart=()=>{if(rec!==thisRec)return;recActive=true;ignoreRec=false;setMicUi();$('#state').textContent='Listening…'};
+  rec.onresult=e=>{
+    if(rec!==thisRec||ignoreRec||isTtsActive()||busy)return;
+    let t='';for(const r of e.results)t+=r[0].transcript;$('#input').value=t;
+    if(e.results[e.results.length-1].isFinal){
+      if(!t.trim())return;
+      if(micMode==='momentary')micArmed=false;
+      stopCapture();send();
+    }
+  };
+  rec.onerror=e=>{
+    if(rec!==thisRec)return;recActive=false;
+    if(e.error==='not-allowed'||e.error==='service-not-allowed'){
+      micArmed=false;clearTimeout(micResumeTimer);toast('Microphone permission denied');
+    }
+    setMicUi();
+  };
+  rec.onend=()=>{
+    if(rec!==thisRec)return;recActive=false;setMicUi();
+    if(!micArmed){if(!busy&&!isTtsActive())$('#state').textContent='Ready';return}
+    if(micMode==='toggle'&&!busy&&!isTtsActive())scheduleMicResume();
+  };
+  try{rec.start()}catch(e){recActive=false;setMicUi();if(micArmed&&micMode==='toggle')scheduleMicResume()}
+}
+function toggleMic(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR)return toast('Voice input is not supported in this browser');
+  if(micArmed){
+    micArmed=false;clearTimeout(micResumeTimer);stopCapture();ignoreRec=false;setMicUi();
+    if(!busy)$('#state').textContent='Ready';
+    return;
+  }
+  if(LS('micConsent')!=='1'){if(!confirm('Voice input uses your browser\'s speech service, which sends audio to Microsoft/Google servers (not local). Turn it on?'))return;LSset('micConsent','1')}
+  micArmed=true;setMicUi();
+  if(busy||isTtsActive()){$('#state').textContent=isTtsActive()?'Mic on — waiting until I finish speaking…':'Mic on — waiting until I finish…';return}
+  startCapture();
+}
+$('#mic').onclick=toggleMic;
+$('#micMode').onclick=()=>setMicMode(micMode==='toggle'?'momentary':'toggle');
+
+// ---------- bots ----------
+async function refreshBots(){try{const b=await api('/api/bots');
+  $('#botRows').innerHTML=`<div class="note">Local inventory only. Jarvis can't contact cloud bots directly.</div>`+(b.bots||[]).map(x=>`<div class="bot"><div class="n"><b>${esc(x.name)}</b><span class="pill ${x.status==='active'?'g':'y'}">${esc(x.status||'')}</span></div><div class="r">${esc(x.role||'')}${x.work&&x.work.length?' · '+esc(x.work.join(', ')):''}</div></div>`).join('')
+   +(b.local_models?`<div class="note" style="padding-top:8px">Local models · ${esc(b.local_models.host||'')}</div><div class="mods">${(b.local_models.models||[]).map(m=>`<span title="${esc(m.use)}">${esc(m.name)}</span>`).join('')}</div>`:'')
+   +`<div style="padding:2px 10px 8px"><button class="btn" id="coachBtn">Ask the bot coach</button></div>`;
+  $('#coachBtn').onclick=()=>quick({label:'Bot coach',action:'coach'});}catch(e){$('#botRows').innerHTML='<div class="note">Could not load bots.json</div>'}}
+$('#sideTabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;const t=b.dataset.t;document.querySelectorAll('#sideTabs button').forEach(x=>x.classList.toggle('on',x===b));
+  $('#sysRows').classList.toggle('hidden',t!=='sys');$('#botRows').classList.toggle('hidden',t!=='bots');$('#sysTime').classList.toggle('hidden',t!=='sys');if(t==='bots')refreshBots()};
+
+// ---------- command palette (Ctrl/Cmd+K) ----------
+let palItems=[],palSel=0;
+function palCommands(){const L=[];
+  (CFG?.quick_commands||[]).forEach(c=>L.push({label:c.label,hint:'Quick command',run:()=>quick(c)}));
+  if(!(CFG?.quick_commands||[]).some(c=>c.action==='coach'))L.push({label:'Bot coach',hint:'Advice on your bots',run:()=>quick({label:'Bot coach',action:'coach'})});
+  (CUSTOM?.commands||[]).forEach(c=>L.push({label:c.label,hint:'Custom command',run:()=>ask(c.prompt,{label:c.label})}));
+  L.push({label:'Chat mode',hint:'Mode',run:()=>setMode('chat')},{label:'Program mode',hint:'Mode',run:()=>setMode('program')},
+    {label:`Focus mode: turn ${focusOn?'off':'on'}`,hint:'Toggle',run:()=>setFocus(!focusOn)},{label:`Voice: turn ${voiceOn?'off':'on'}`,hint:'Toggle',run:()=>$('#tVoice').click()},{label:`Mic mode: ${micMode==='toggle'?'switch to momentary':'switch to continuous toggle'}`,hint:'Toggle',run:()=>$('#micMode').click()},{label:`Wall-E map: ${document.body.classList.contains('wally-map-off')?'show':'hide'}`,hint:'Toggle',run:()=>setWallyMap(document.body.classList.contains('wally-map-off'))},{label:'Refresh Wally status',hint:'Wally',run:()=>refreshWally()},
+    {label:`Web: ${webSession?'stop authorizing':'authorize for session'}`,hint:'Toggle',run:()=>$('#tWeb').click()},
+    {label:'Show bots',hint:'Sidebar',run:()=>document.querySelector('#sideTabs [data-t=bots]').click()},{label:'Show systems',hint:'Sidebar',run:()=>document.querySelector('#sideTabs [data-t=sys]').click()},
+    {label:'Undo last program change',hint:'Program',run:()=>$('#undo').click()});return L}
+function fuzzy(q,t){q=q.toLowerCase();const s=t.toLowerCase();if(!q)return{score:1,idx:[]};let i=0,idx=[],score=0,last=-2;
+  for(let j=0;j<s.length&&i<q.length;j++)if(s[j]===q[i]){idx.push(j);score+=(j===last+1?3:1)+(j===0||s[j-1]===' '?2:0);last=j;i++}
+  return i===q.length?{score:score-s.length*.01,idx}:null}
+function palRender(){const q=$('#palIn').value.trim();palItems=palCommands().map(c=>({...c,m:fuzzy(q,c.label)})).filter(c=>c.m).sort((a,b)=>b.m.score-a.m.score);
+  if(palSel>=palItems.length)palSel=Math.max(0,palItems.length-1);
+  const hl=(t,idx)=>[...t].map((ch,k)=>idx.includes(k)?`<mark>${esc(ch)}</mark>`:esc(ch)).join('');
+  $('#palList').innerHTML=palItems.map((c,i)=>`<div class="pi ${i===palSel?'sel':''}" data-i="${i}"><span>${hl(c.label,c.m.idx)}</span><small>${esc(c.hint)}</small></div>`).join('')
+    +(q&&!palItems.length?`<div class="pi sel"><span>Ask Jarvis: “${esc(q)}”</span><small>Enter</small></div>`:'');
+  const el=$('#palList .sel');el&&el.scrollIntoView({block:'nearest'})}
+function palOpen(){$('#pal').classList.add('show');$('#palIn').value='';palSel=0;palRender();setTimeout(()=>$('#palIn').focus(),0)}
+function palClose(){$('#pal').classList.remove('show');$('#input').focus()}
+function palRun(){const q=$('#palIn').value.trim();const c=palItems[palSel];palClose();if(c)c.run();else if(q)ask(q)}
+$('#palIn').oninput=()=>{palSel=0;palRender()};
+$('#palIn').onkeydown=e=>{if(e.key==='ArrowDown'){e.preventDefault();palSel=Math.min(palItems.length-1,palSel+1);palRender()}else if(e.key==='ArrowUp'){e.preventDefault();palSel=Math.max(0,palSel-1);palRender()}else if(e.key==='Enter'){e.preventDefault();palRun()}else if(e.key==='Escape'){e.preventDefault();palClose()}};
+$('#palList').onclick=e=>{const d=e.target.closest('.pi');if(!d)return;if(d.dataset.i!==undefined)palSel=+d.dataset.i;palRun()};
+$('#pal').onclick=e=>{if(e.target.id==='pal')palClose()};$('#palBtn').onclick=palOpen;
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#pal').classList.contains('show')?palClose():palOpen()}},true);
+
+
+// ---------- Roborock Qrevo L panel (live, no cache) ----------
+const ROBOT_POLL_MS=45000;
+let robotBusy=false, robotTimer=null;
+function robotDockLine(s){
+  if(!s) return 'Dock state unknown';
+  if(s.charging) return 'On dock, charging';
+  return s.dock_label || s.dock_state || 'Dock state unknown';
+}
+function renderRobot(s, errText){
+  const batt=s && s.battery;
+  const known=batt!=null && batt!=='';
+  $('#robotBatt').innerHTML=(known?esc(String(Math.round(Number(batt)))):'—')+'<small>%</small>';
+  let dot='y';
+  if(errText || (s && s.error)) dot='r';
+  else if(s && s.ok && (s.charging || String(s.dock_state||'').toLowerCase()==='charging')) dot='g';
+  else if(s && s.ok) dot='y';
+  $('#robotDot').className='dot '+dot;
+  const mode=(s && s.mode)?String(s.mode):'—';
+  const clean=s && (s.in_cleaning===1 || s.in_cleaning==='1');
+  $('#robotLines').innerHTML=`<b>${esc((s && (s.product || s.name)) || 'Qrevo L')}</b><br>${esc(errText?'Live status unavailable':robotDockLine(s))}<br>Mode ${esc(mode)}${clean?' · cleaning':''}`;
+  const err=$('#robotErr');
+  if(s && s.error){err.textContent='Error: '+s.error;err.classList.remove('hidden')}
+  else if(errText){err.textContent=errText;err.classList.remove('hidden')}
+  else {err.textContent='';err.classList.add('hidden')}
+  const when=s && s.fetched_at?new Date(s.fetched_at):new Date();
+  $('#robotUpdated').textContent=when.toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'});
+}
+async function refreshRobot(){
+  if(robotBusy) return;
+  robotBusy=true;
+  try{
+    const s=await api('/api/roborock/status');
+    renderRobot(s, s && s.ok? '' : (s && (s.reason||s.error)) || 'Could not reach the vacuum');
+  }catch(e){
+    renderRobot(null, e.message||'Could not reach the vacuum');
+  }finally{robotBusy=false}
+}
+function fmtWatchState(j){
+  const st=j && j.state || {};
+  const task=j && j.task && (j.task.result || j.task) || {};
+  const rooms=(st.rooms||j.live_rooms||[]).map(r=>r.name||('Room '+r.segment_id)).join(', ');
+  const lines=[
+    `Watcher: ${st.status||'unknown'}${(st.threshold!=null)?` at ${st.threshold}%`:''}`,
+    task.state?`Task ${task.task||'Jarvis-Roborock-BatteryWatch'}: ${task.state}`: '',
+    rooms?`Will mop: ${rooms}`:'',
+    st.last_poll_at?`Last poll: ${new Date(st.last_poll_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'})}`:'',
+    st.fired_at?'Already fired this run.':'Has not started a clean yet.'
+  ];
+  return lines.filter(Boolean).join('\n');
+}
+async function robotCommand(action, confirmText){
+  if(confirmText && !window.confirm(confirmText)) return;
+  const btn={mop:$('#robotMop'),clean:$('#robotVac'),dock:$('#robotDock')}[action];
+  if(btn) btn.disabled=true;
+  $('#robotNote').textContent=(action==='dock'?'Sending dock command…':'Starting whole-house '+action+'…');
+  try{
+    const j=await api('/api/roborock/command',{action});
+    $('#robotNote').textContent=j.ok?(j.result && j.result.message) || (action==='dock'?'Dock command sent.':'Whole-house '+action+' started.'):(j.reason||j.error||'Command failed');
+    toast(j.ok?'Qrevo L: command sent':(j.reason||'Command failed'));
+    refreshRobot();
+  }catch(e){
+    $('#robotNote').textContent=e.message||'Command failed';
+    toast(e.message);
+  }finally{if(btn) btn.disabled=false}
+}
+$('#robotMop').onclick=()=>robotCommand('mop','Start a whole-house mop of all live rooms on the Qrevo L now?');
+$('#robotVac').onclick=()=>robotCommand('clean','Start a whole-house vacuum of all live rooms on the Qrevo L now?');
+$('#robotDock').onclick=()=>robotCommand('dock','Send the Qrevo L back to the dock now?');
+$('#robotWatch').onclick=async()=>{
+  $('#robotWatch').disabled=true;
+  $('#robotNote').textContent='Fetching live watcher status…';
+  try{
+    const j=await api('/api/roborock/watcher');
+    $('#robotNote').textContent=j.ok?fmtWatchState(j):(j.reason||'Could not read watcher status');
+  }catch(e){$('#robotNote').textContent=e.message}
+  finally{$('#robotWatch').disabled=false}
+};
+
+// ---------- Wally panel (controls + live diagnostics) and auto-open live map ----------
+const WALLY_POLL_MS=15000;
+let wallyBattHealth=null;
+function renderWallyBatteryHealth(h){
+  wallyBattHealth=h||wallyBattHealth;
+  const el=$('#wallyBattAlert');
+  if(el){
+    if(wallyBattHealth && wallyBattHealth.health_check_due){
+      el.innerHTML='<b>Battery health check due.</b> '+esc(wallyBattHealth.message||('Wall-E has reached '+(wallyBattHealth.cycles)+' cycles. Run a capacity test before the next dock run.'));
+      el.classList.remove('hidden');
+    }else{el.textContent='';el.classList.add('hidden')}
+  }
+  const line=$('#wallyBattLog');
+  if(line && wallyBattHealth && wallyBattHealth.ok){
+    const cyc=(wallyBattHealth.cycles!=null)?Number(wallyBattHealth.cycles).toFixed(2):'—';
+    const cur=wallyBattHealth.current_available?'current live':'current N/A';
+    const rows=(wallyBattHealth.logging && wallyBattHealth.logging.rows!=null)?wallyBattHealth.logging.rows+' samples':'logging';
+    line.textContent='Battery log · '+cyc+' cycles · '+cur+' · '+rows;
+  }
+}
+const WALLY_MAP_URL='http://192.168.50.125:8095/';
+const YOLO_URL='http://127.0.0.1:8787';
+let wallyBusy=false, wallyLast=null, wallyMapTimer=null, wallyMapWasLive=false, yoloOverlayOn=LS('yoloOverlay')!=='0', yoloTimer=null, yoloLast=null, yoloPopIdx=-1, yoloWasOffline=false, yoloStreamBroken=false, yoloStreamRestartAt=0;
+function fmtM(v){return (v==null||v==='')?'—':`${Number(v).toFixed(2)} m`}
+function svcPill(name, state){
+  const st=String(state||'').toLowerCase();
+  const ok=st==='active'||st==='running'||st==='up';
+  return `<span class="${ok?'g':'r'}">${esc(name)}</span>`;
+}
+function renderWally(s, errText){
+  wallyLast=s||wallyLast;
+  const batt=s && s.battery;
+  const known=batt!=null && batt!=='';
+  $('#wallyBatt').innerHTML=(known?esc(String(Math.round(Number(batt)))):'—')+'<small>%</small>';
+  let dot='y';
+  if(errText || (s && s.error) || (s && s.unreachable)) dot='r';
+  else if(s && s.ok && s.estop_latched) dot='r';
+  else if(s && s.ok && s.armed) dot='g';
+  else if(s && s.ok) dot='y';
+  $('#wallyDot').className='dot '+dot;
+  const mode=(s && s.mode)?String(s.mode):'—';
+  const armed=s && s.armed?'armed':'disarmed';
+  const volt=s && s.voltage!=null?` · ${Number(s.voltage).toFixed(2)} V`:'';
+  const voice=s && s.voice_ok?' · voice up':'';
+  const expl=s && s.explore_running?' · exploring':'';
+  const mapping=s && s.mapping_running?' · mapping':'';
+  $('#wallyLines').innerHTML=`<b>${esc((s && s.name) || 'Wally')}</b><br>${esc(errText?'Live status unavailable':`${armed} · ${mode} mode${volt}`)}<br>${esc(errText?'':`192.168.50.125${voice}${expl}${mapping}`)}`;
+  const err=$('#wallyErr');
+  if(s && s.estop_latched && !errText){err.textContent='An emergency-stop latch is present. Jarvis will not clear it from this panel.';err.classList.remove('hidden')}
+  else if(s && s.error){err.textContent='Error: '+s.error;err.classList.remove('hidden')}
+  else if(errText){err.textContent=errText;err.classList.remove('hidden')}
+  else {err.textContent='';err.classList.add('hidden')}
+  const lidarPts=s && (s.lidar_points!=null?s.lidar_points:(s.lidar&&s.lidar.points));
+  const front=s && (s.front_m!=null?s.front_m:(s.lidar&&s.lidar.front_m));
+  const depth=s && s.depth;
+  const depthOk=depth && (depth.online===true || depth.fresh===true || depth.topic_online===true);
+  const pose=s && s.pose;
+  const odom=s && s.odom;
+  const poseTxt=pose&&pose.x!=null?`pose ${Number(pose.x).toFixed(2)}, ${Number(pose.y).toFixed(2)} yaw ${Number(pose.yaw||0).toFixed(2)}`:(odom&&odom.v!=null?`odom v ${Number(odom.v).toFixed(2)} w ${Number(odom.w||0).toFixed(2)}`:'pose —');
+  const cores=s && s.core_services || {};
+  const mentor=s && s.mentorpi;
+  if(mentor) cores.MentorPi = mentor.running?'active':(mentor.status||'inactive');
+  const diag=$('#wallyDiag');
+  if(diag){
+    diag.innerHTML=errText?'Sensors unavailable until Wally answers.':(
+      `<div><b>LiDAR</b> ${lidarPts!=null?esc(String(lidarPts))+' pts':'—'} · front ${esc(fmtM(front))}</div>`+
+      `<div><b>Depth</b> ${depthOk?'online':'offline'}${depth&&depth.valid!=null?` · valid ${esc(String(depth.valid))}`:''} · <b>Odom</b> ${esc(poseTxt)}</div>`+
+      `<div class="wally-svcs">${['gb-gate','gb-watchdog','grokbot','gb-mapview','MentorPi'].map(n=>svcPill(n, cores[n])).join('')}</div>`
+    );
+  }
+  const estop=!!(s&&s.estop_latched);
+  const isArmed=!!(s&&s.armed);
+  const onGround=String(mode).toLowerCase()==='ground';
+  const setDis=(id,d)=>{const b=$(id); if(b) b.disabled=!!d};
+  const armOff=estop || isArmed || !!errText;
+  const disarmOff=!isArmed || !!errText;
+  setDis('#wallyArm', armOff);
+  setDis('#wallyDisarm', disarmOff);
+  setDis('#wallyDriveArm', armOff);
+  setDis('#wallyDriveDisarm', disarmOff);
+  setDis('#wallyExploreStart', estop || !isArmed || !!(s&&s.explore_running) || !!errText);
+  setDis('#wallyExploreStop', !(s&&s.explore_running));
+  setDis('#wallyMapStart', estop || !!(s&&s.mapping_running) || !!errText);
+  setDis('#wallyMapStop', !(s&&s.mapping_running));
+  setDis('#wallyModeGround', onGround && !errText);
+  setDis('#wallyModeBench', String(mode).toLowerCase()==='bench' && !errText);
+  const when=s && s.fetched_at?new Date(s.fetched_at):new Date();
+  $('#wallyUpdated').textContent=when.toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'});
+  updateWallyDriveUi();
+}
+async function refreshWally(){
+  if(wallyBusy) return;
+  wallyBusy=true;
+  try{
+    const [s,h]=await Promise.all([api('/api/wally/status'),api('/api/wally/battery-health').catch(()=>null)]);
+    renderWally(s, s && s.ok? '' : (s && (s.reason||s.error)) || 'Could not reach Wally');
+    if(h && h.ok) renderWallyBatteryHealth(h);
+  }catch(e){
+    renderWally(null, e.message||'Could not reach Wally');
+  }finally{wallyBusy=false}
+}
+async function wallyCommand(action, confirmText, extra){
+  if(confirmText && !window.confirm(confirmText)) return;
+  const note=$('#wallyNote');
+  if(note) note.textContent='Sending '+action.replace(/_/g,' ')+'…';
+  try{
+    const j=await api('/api/wally/command', Object.assign({action}, extra||{}));
+    const msg=j.ok
+      ? ((j.result && (j.result.message||j.result.note)) || ('Wally: '+action.replace(/_/g,' ')+' ok'))
+      : (j.reason||j.error||'Command failed');
+    if(note) note.textContent=msg;
+    toast(j.ok?('Wally: '+action.replace(/_/g,' ')):(j.reason||'Command failed'));
+    await refreshWally();
+    return j;
+  }catch(e){
+    if(note) note.textContent=e.message||'Command failed';
+    toast(e.message);
+  }
+}
+function setWallyMap(on){
+  document.body.classList.toggle('wally-map-on', !!on);
+  document.body.classList.toggle('wally-map-off', !on);
+  setTog('#tWallyMap', !!on);
+  if(on){
+    try{
+      if(window.outerWidth<1760 && screen.availWidth>=1800){
+        window.resizeTo(Math.min(1840, screen.availWidth), Math.max(window.outerHeight||900, 900));
+      }
+    }catch(e){}
+    pingWallyMap(true);
+  }
+}
+function reloadWallyMap(){
+  const f=$('#wallyMapFrame');
+  if(f) f.src=WALLY_MAP_URL+(WALLY_MAP_URL.indexOf('?')>=0?'&':'?')+'t='+Date.now();
+}
+async function pingWallyMap(forceReload){
+  const st=$('#wallyMapStatus'), off=$('#wallyMapOffline');
+  try{
+    const r=await fetch(WALLY_MAP_URL+'api/state',{cache:'no-store',mode:'cors',signal:AbortSignal.timeout(4000)});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j=await r.json();
+    const label=(j&&j.map&&j.map.label)?j.map.label:(j&&j.rosbridge?'Live LiDAR':'Live');
+    if(st) st.textContent=label;
+    if(off) off.classList.add('hidden');
+    if(forceReload || (wallyMapWasLive===false && j)) reloadWallyMap();
+    wallyMapWasLive=true;
+    return j;
+  }catch(e){
+    if(st) st.textContent='Offline';
+    if(off){off.classList.remove('hidden'); off.textContent="Wall-E's live map is offline. Reconnecting…";}
+    wallyMapWasLive=false;
+    return null;
+  }
+}
+function showWallyMap(){
+  setWallyMap(true);
+  const col=$('#wallyMapCol')||$('#pWallyMap');
+  if(col&&col.scrollIntoView) col.scrollIntoView({block:'nearest',inline:'nearest'});
+  pingWallyMap(true);
+}
+$('#wallyRefresh').onclick=()=>{refreshWally();};
+const WALLY_ARM_CONFIRM='Arm Wall-E now? He will stay still until you start a motion command. Provenance will be tagged actor=jarvis.';
+const WALLY_DISARM_CONFIRM='Disarm Wall-E now? A live mission lease may block this if voice still owns the mission.';
+async function wallyArmFromUi(){ return wallyCommand('arm', WALLY_ARM_CONFIRM); }
+async function wallyDisarmFromUi(){
+  if(wallyDriveHeld || (wallyDriveKeys && wallyDriveKeys.size) || (wallyDrivePointers && wallyDrivePointers.size)) await Promise.resolve(wallyDriveStop('disarm'));
+  return wallyCommand('disarm', WALLY_DISARM_CONFIRM);
+}
+$('#wallyArm').onclick=()=>wallyArmFromUi();
+$('#wallyDisarm').onclick=()=>wallyDisarmFromUi();
+const driveArmBtn=$('#wallyDriveArm'), driveDisarmBtn=$('#wallyDriveDisarm');
+if(driveArmBtn) driveArmBtn.onclick=ev=>{ ev.preventDefault(); ev.stopPropagation(); wallyArmFromUi(); };
+if(driveDisarmBtn) driveDisarmBtn.onclick=ev=>{ ev.preventDefault(); ev.stopPropagation(); wallyDisarmFromUi(); };
+$('#wallyExploreStart').onclick=()=>wallyCommand('explore','Start exploration? Wall-E will begin moving on the floor. He must already be armed.');
+$('#wallyExploreStop').onclick=()=>wallyCommand('explore_stop');
+$('#wallyMapStart').onclick=()=>wallyCommand('map_start','Start LiDAR SLAM mapping? This starts slam_toolbox and does not move Wall-E by itself.');
+$('#wallyMapStop').onclick=()=>wallyCommand('map_stop');
+$('#wallyModeGround').onclick=()=>wallyCommand('mode','Switch Wall-E to ground / floor mode and remove the bench-guard bypass if it is present?',{mode:'ground'});
+$('#wallyModeBench').onclick=()=>wallyCommand('mode','Switch Wall-E to bench mode? This does not arm or move him, and will not create the bench-guard bypass.',{mode:'bench'});
+$('#wallyLiveMap').onclick=()=>{
+  if(document.body.classList.contains('wally-map-off')) showWallyMap();
+  else { pingWallyMap(true); const f=$('#wallyMapFrame'); if(f){ try{f.contentWindow&&f.contentWindow.focus&&f.contentWindow.focus()}catch(e){} } }
+};
+
+function setYoloOverlay(on){
+  yoloOverlayOn=!!on;
+  LSset('yoloOverlay', on?'1':'0');
+  const wrap=$('#wallyMapFrameWrap'), btn=$('#wallyYoloOverlayBtn'), img=$('#wallyYoloStream');
+  if(wrap) wrap.classList.toggle('yolo-on', !!on);
+  if(btn) btn.classList.toggle('on', !!on);
+  if(!img) return;
+  if(on){
+    const start=src=>{ img.dataset.srcKind=src; img.src=(src==='proxy'?'/api/yolo/stream':(YOLO_URL+'/stream'))+'?t='+Date.now(); };
+    img.onerror=()=>{
+      if(img.dataset.srcKind!=='direct') start('direct');
+      else yoloStreamBroken=true;
+    };
+    img.onload=()=>{ yoloStreamBroken=false; renderYoloHits(); };
+    start('proxy');
+    renderYoloHits();
+  }else{
+    img.onerror=null; img.onload=null; img.removeAttribute('src'); delete img.dataset.srcKind;
+    yoloStreamBroken=false;
+    closeYoloPop();
+    const hits=$('#wallyYoloHits'); if(hits){ hits.innerHTML=''; hits.hidden=true; }
+  }
+}
+function restartYoloStreamIfNeeded(reason){
+  if(!yoloOverlayOn) return false;
+  const img=$('#wallyYoloStream');
+  const blank=!!(img && (!img.getAttribute('src') || (yoloStreamBroken && (!img.naturalWidth || img.naturalWidth===0))));
+  if(!yoloWasOffline && !blank) return false;
+  const now=Date.now();
+  if(now-yoloStreamRestartAt<4000) return false;
+  yoloStreamRestartAt=now;
+  yoloWasOffline=false;
+  yoloStreamBroken=false;
+  setYoloOverlay(true);
+  return true;
+}
+async function refreshYoloDets(){
+  if(document.body.classList.contains('wally-map-off')) return;
+  const chips=$('#wallyYoloChips'), meta=$('#wallyYoloMeta');
+  const pull=async base=>{
+    const r=await fetch(base+'/latest',{cache:'no-store',mode:base.startsWith('/')?'same-origin':'cors',signal:AbortSignal.timeout(1500)});
+    if(!r.ok) throw new Error('http '+r.status);
+    return r.json();
+  };
+  let j=null;
+  try{ j=await pull('/api/yolo'); }
+  catch(e){ try{ j=await pull(YOLO_URL); }catch(e2){
+    yoloWasOffline=true;
+    if(meta) meta.innerHTML='YOLO <b>offline</b>';
+    if(chips) chips.innerHTML='<span class="wally-yolo-chip off">vision service waiting</span>';
+    return;
+  } }
+  if(yoloOverlayOn) restartYoloStreamIfNeeded('yolo-recovered');
+  const fps=j && j.fps!=null?Number(j.fps).toFixed(1):'—';
+  const model=(j && j.model) || '—';
+  if(meta) meta.innerHTML=`<b>${model}</b> · ${fps} fps`;
+  const items=(j && j.detections) || [];
+  yoloLast=j||yoloLast;
+  if(chips){
+    if(!items.length) chips.innerHTML='<span class="wally-yolo-chip off">no objects</span>';
+    else chips.innerHTML=items.slice(0,10).map(d=>`<span class="wally-yolo-chip">${esc(d.label||'?')}<span class="c">${Math.round((d.conf||0)*100)}%</span></span>`).join('');
+  }
+  renderYoloHits();
+}
+// ---------- Wall-E Vision manual drive (D-pad + keyboard, gated /gb/cmd_in) ----------
+const WALLY_DRIVE_HEARTBEAT_MS=200;
+const WALLY_DRIVE_MIN_LIN=0.02, WALLY_DRIVE_MAX_LIN=0.288, WALLY_DRIVE_DEF_LIN=0.08;
+const WALLY_DRIVE_DEF_ANG=0.30, WALLY_DRIVE_MAX_ANG=0.48;
+let wallyDriveMode=LS('wallyDriveMode')==='keyboard'?'keyboard':'pad';
+let wallyDriveHeld=null, wallyDriveKeys=new Set(), wallyDrivePointers=new Map(), wallyDriveTimer=0, wallyDriveSeq=0;
+function clampDriveLin(v){
+  const n=Number(v);
+  if(!Number.isFinite(n)) return WALLY_DRIVE_DEF_LIN;
+  return Math.min(WALLY_DRIVE_MAX_LIN, Math.max(WALLY_DRIVE_MIN_LIN, n));
+}
+function loadDriveSpeed(){
+  return clampDriveLin(LS('wallyDriveSpeed')!=null?LS('wallyDriveSpeed'):WALLY_DRIVE_DEF_LIN);
+}
+let wallyDriveSpeed=loadDriveSpeed();
+function fmtDriveSpeed(v){ return Number(v).toFixed(3)+' m/s'; }
+function setWallyDriveSpeed(v, persist){
+  wallyDriveSpeed=clampDriveLin(v);
+  if(persist!==false) LSset('wallyDriveSpeed', String(wallyDriveSpeed));
+  const sl=$('#wallyDriveSpeed'), val=$('#wallyDriveSpeedVal');
+  if(sl && Number(sl.value)!==wallyDriveSpeed) sl.value=String(wallyDriveSpeed);
+  if(val) val.textContent=fmtDriveSpeed(wallyDriveSpeed);
+}
+function driveVelFor(dir){
+  const lin=clampDriveLin(wallyDriveSpeed);
+  const scale=WALLY_DRIVE_DEF_LIN>0?(lin/WALLY_DRIVE_DEF_LIN):1;
+  const ang=Math.min(WALLY_DRIVE_MAX_ANG, WALLY_DRIVE_DEF_ANG*scale);
+  if(dir==='forward') return {lin, ang:0};
+  if(dir==='back') return {lin:-lin, ang:0};
+  if(dir==='left') return {lin:0, ang};
+  if(dir==='right') return {lin:0, ang:-ang};
+  if(dir==='forward-left') return {lin, ang};
+  if(dir==='forward-right') return {lin, ang:-ang};
+  if(dir==='back-left') return {lin:-lin, ang};
+  if(dir==='back-right') return {lin:-lin, ang:-ang};
+  return {lin:0, ang:0};
+}
+function capDriveVel(lin, ang){
+  lin=lin>0?Math.min(WALLY_DRIVE_MAX_LIN, lin):(lin<0?Math.max(-WALLY_DRIVE_MAX_LIN, lin):0);
+  ang=ang>0?Math.min(WALLY_DRIVE_MAX_ANG, ang):(ang<0?Math.max(-WALLY_DRIVE_MAX_ANG, ang):0);
+  return {lin, ang, active:!!(lin||ang)};
+}
+function velFromDirs(dirs){
+  let wantFwd=false, wantBack=false, wantLeft=false, wantRight=false;
+  (dirs||[]).forEach(d=>{
+    if(d==='forward'||d==='forward-left'||d==='forward-right') wantFwd=true;
+    if(d==='back'||d==='back-left'||d==='back-right') wantBack=true;
+    if(d==='left'||d==='forward-left'||d==='back-left') wantLeft=true;
+    if(d==='right'||d==='forward-right'||d==='back-right') wantRight=true;
+  });
+  const fwd=driveVelFor('forward'), back=driveVelFor('back'), left=driveVelFor('left'), right=driveVelFor('right');
+  let lin=0, ang=0;
+  if(wantFwd && !wantBack) lin=fwd.lin;
+  else if(wantBack && !wantFwd) lin=back.lin;
+  if(wantLeft && !wantRight) ang=left.ang;
+  else if(wantRight && !wantLeft) ang=right.ang;
+  return capDriveVel(lin, ang);
+}
+function padHeldDirs(){
+  const dirs=new Set();
+  wallyDrivePointers.forEach(d=>{ if(d && d!=='stop') dirs.add(d); });
+  return dirs;
+}
+function heldDirName(vel){
+  if(!vel || !vel.active) return null;
+  if(vel.lin>0 && vel.ang>0) return 'forward-left';
+  if(vel.lin>0 && vel.ang<0) return 'forward-right';
+  if(vel.lin<0 && vel.ang>0) return 'back-left';
+  if(vel.lin<0 && vel.ang<0) return 'back-right';
+  if(vel.lin>0) return 'forward';
+  if(vel.lin<0) return 'back';
+  if(vel.ang>0) return 'left';
+  if(vel.ang<0) return 'right';
+  return null;
+}
+function isTypingTarget(el){
+  if(!el) return false;
+  if(el.id==='wallyDriveSpeed' || String(el.type||'').toLowerCase()==='range') return false;
+  const tag=(el.tagName||'').toLowerCase();
+  const hit=el.closest && el.closest('input,textarea,select,[contenteditable="true"],[contenteditable=""]');
+  if(hit && (hit.id==='wallyDriveSpeed' || String(hit.type||'').toLowerCase()==='range')) return false;
+  if(tag==='input'||tag==='textarea'||tag==='select') return true;
+  if(el.isContentEditable) return true;
+  return !!hit;
+}
+function wallyManualAllowed(){
+  const s=wallyLast;
+  if(!s||!s.ok||s.unreachable||s.estop_latched||s.explore_running||!s.armed) return false;
+  return true;
+}
+function wallyDriveBadgeInfo(){
+  const s=wallyLast, md=s && s.manual_drive;
+  if(md && md.badge){
+    const cls=md.code==='ready'?'good':(md.code==='estop'||md.code==='unknown'?'bad':'warn');
+    return {cls, text:md.badge, hint:md.reason||''};
+  }
+  if(!s||!s.ok) return {cls:'bad', text:'Status unknown — manual disabled', hint:'Live status is required before manual drive.'};
+  if(s.estop_latched) return {cls:'bad', text:'E-stop latched — manual disabled', hint:'Jarvis will not clear an emergency-stop latch from this panel.'};
+  if(s.explore_running) return {cls:'warn', text:'Explore active — manual disabled', hint:'Stop explore before using the D-pad or keyboard drive.'};
+  if(!s.armed) return {cls:'warn', text:'Disarmed', hint:'Arm Wall-E before using manual drive. Stop is always available.'};
+  return {cls:'good', text:'Armed — manual ready', hint:''};
+}
+function updateWallyDriveUi(){
+  const box=$('#wallyDrive'), badge=$('#wallyDriveBadge'), hint=$('#wallyDriveHint');
+  if(!box) return;
+  box.classList.toggle('kbd-mode', wallyDriveMode==='keyboard');
+  box.classList.toggle('manual-off', !wallyManualAllowed());
+  const padBtn=$('#wallyDrivePadMode'), keyBtn=$('#wallyDriveKeyMode');
+  if(padBtn) padBtn.classList.toggle('on', wallyDriveMode==='pad');
+  if(keyBtn) keyBtn.classList.toggle('on', wallyDriveMode==='keyboard');
+  const info=wallyDriveBadgeInfo();
+  if(badge){ badge.className='wally-drive-badge '+info.cls; badge.textContent=info.text; }
+  if(hint){
+    const modeHint=wallyDriveMode==='keyboard'
+      ? 'Keyboard: arrows or WASD to drive; W+A / W+D / S+A / S+D (or arrow pairs) turn while moving. Space or Esc to stop. Ignored in the chat box. Click this pad to capture keys.'
+      : 'Pad: hold a direction or a corner to drive and turn, or hold Forward+Left together. Release to stop. Keyboard drive is off in Pad mode. Stop is always available.';
+    hint.textContent=(info.hint?info.hint+' ':'')+modeHint;
+  }
+  if(!wallyManualAllowed() && ((wallyDriveHeld && wallyDriveHeld!=='stop') || wallyDrivePointers.size || wallyDriveKeys.size)) wallyDriveStop('disabled');
+}
+function setWallyDriveMode(mode){
+  const next=mode==='keyboard'?'keyboard':'pad';
+  if(next!==wallyDriveMode) wallyDriveStop('mode-switch');
+  wallyDriveMode=next;
+  LSset('wallyDriveMode', wallyDriveMode);
+  updateWallyDriveUi();
+  if(wallyDriveMode==='keyboard'){
+    const box=$('#wallyDrive');
+    if(box){ try{ box.focus(); box.classList.add('kb-focus'); }catch(e){} }
+  }
+}
+async function postWallyDrive(lin, ang, why){
+  const cl=Number(lin)||0, ca=Number(ang)||0;
+  lin=cl>0?Math.min(WALLY_DRIVE_MAX_LIN, cl):(cl<0?Math.max(-WALLY_DRIVE_MAX_LIN, cl):0);
+  ang=ca>0?Math.min(WALLY_DRIVE_MAX_ANG, ca):(ca<0?Math.max(-WALLY_DRIVE_MAX_ANG, ca):0);
+  const r=await fetch('/api/wally/drive',{method:'POST',headers:H,body:JSON.stringify({lin,ang,src:'jarvis-ui',why:why||''})});
+  let j=null;
+  try{ j=await r.json(); }catch(e){ j={ok:false,error:'Bad drive response'}; }
+  if(j && j.badge){
+    const badge=$('#wallyDriveBadge');
+    if(badge){
+      const cls=j.code==='ready'?'good':(j.code==='estop'||j.code==='unknown'||!j.ok && !j.stop?'bad':'warn');
+      badge.className='wally-drive-badge '+(j.ok && j.code==='ready'?'good':(j.code==='ready'?'good':(j.code==='estop'||j.code==='unknown'?'bad':(j.code==='disarmed'||j.code==='explore'?'warn':cls))));
+      badge.textContent=j.badge;
+    }
+  }
+  if(!j.ok && !j.stop) throw new Error(j.error||j.reason||'Drive refused');
+  return j;
+}
+function currentDriveVel(){
+  if(wallyDriveMode==='keyboard') return velFromDirs(wallyDriveKeys);
+  return velFromDirs(padHeldDirs());
+}
+function markDpadHeld(){
+  const vel=currentDriveVel();
+  const combo=heldDirName(vel);
+  const held=wallyDriveMode==='keyboard'?wallyDriveKeys:padHeldDirs();
+  document.querySelectorAll('#wallyDpad button[data-dir]').forEach(b=>{
+    const d=b.dataset.dir;
+    b.classList.toggle('held', !!d && d!=='stop' && (held.has(d) || d===combo));
+  });
+}
+async function wallyDrivePulse(why){
+  const vel=currentDriveVel();
+  const seq=++wallyDriveSeq;
+  try{
+    await postWallyDrive(vel.lin, vel.ang, why);
+  }catch(e){
+    if(seq===wallyDriveSeq && !vel.lin && !vel.ang) return;
+    if(seq===wallyDriveSeq && vel.active){ /* keep trying on next heartbeat; badge already updated */ }
+  }
+}
+function wallyDriveStart(dir, pointerId){
+  if(dir==='stop'){ wallyDriveStop('button'); return; }
+  if(wallyDriveMode!=='pad') return;
+  if(!wallyManualAllowed()){ updateWallyDriveUi(); return; }
+  if(pointerId!=null) wallyDrivePointers.set(pointerId, dir);
+  wallyDriveHeld=heldDirName(currentDriveVel()) || dir;
+  markDpadHeld();
+  wallyDrivePulse('hold-start');
+  if(wallyDriveTimer) clearInterval(wallyDriveTimer);
+  wallyDriveTimer=setInterval(()=>{ if(padHeldDirs().size) wallyDrivePulse('heartbeat'); }, WALLY_DRIVE_HEARTBEAT_MS);
+}
+function wallyDriveReleasePointer(pointerId, why){
+  if(pointerId==null || !wallyDrivePointers.has(pointerId)) return;
+  wallyDrivePointers.delete(pointerId);
+  if(!wallyDrivePointers.size){
+    return wallyDriveStop(why||'release');
+  }
+  wallyDriveHeld=heldDirName(currentDriveVel());
+  markDpadHeld();
+  return wallyDrivePulse('pointer-adjust');
+}
+function wallyDriveStop(why){
+  const was=wallyDriveHeld || wallyDriveKeys.size || wallyDrivePointers.size;
+  wallyDriveHeld=null;
+  wallyDriveKeys.clear();
+  wallyDrivePointers.clear();
+  markDpadHeld();
+  if(wallyDriveTimer){ clearInterval(wallyDriveTimer); wallyDriveTimer=0; }
+  if(was) return wallyDrivePulse(why||'stop');
+}
+function bindWallyDrivePad(){
+  const pad=$('#wallyDpad');
+  if(!pad) return;
+  pad.addEventListener('pointerdown', ev=>{
+    const btn=ev.target.closest('button[data-dir]');
+    if(!btn) return;
+    if(ev.button!=null && ev.button!==0) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const dir=btn.dataset.dir;
+    if(dir==='stop'){ wallyDriveStop('button'); return; }
+    try{ btn.setPointerCapture(ev.pointerId); }catch(e){}
+    wallyDriveStart(dir, ev.pointerId);
+  });
+  const up=ev=>{
+    const btn=ev.target && ev.target.closest && ev.target.closest('button[data-dir]');
+    if(btn && btn.dataset.dir==='stop') return;
+    wallyDriveReleasePointer(ev.pointerId, ev.type||'release');
+  };
+  pad.addEventListener('pointerup', up);
+  pad.addEventListener('pointercancel', up);
+  pad.addEventListener('lostpointercapture', ev=>{
+    if(wallyDrivePointers.has(ev.pointerId)) wallyDriveReleasePointer(ev.pointerId, 'lostcapture');
+  });
+  pad.addEventListener('contextmenu', ev=>ev.preventDefault());
+}
+function keyToDir(ev){
+  const k=ev.key;
+  if(k==='ArrowUp'||k==='w'||k==='W') return 'forward';
+  if(k==='ArrowDown'||k==='s'||k==='S') return 'back';
+  if(k==='ArrowLeft'||k==='a'||k==='A') return 'left';
+  if(k==='ArrowRight'||k==='d'||k==='D') return 'right';
+  if(k===' '||k==='Escape'||k==='Esc') return 'stop';
+  return null;
+}
+function bindWallyDriveKeys(){
+  window.addEventListener('keydown', ev=>{
+    if(wallyDriveMode!=='keyboard') return;
+    if(isTypingTarget(ev.target)) return;
+    const dir=keyToDir(ev);
+    if(!dir) return;
+    ev.preventDefault();
+    if(ev.repeat) return;
+    if(dir==='stop'){ wallyDriveStop('key-stop'); return; }
+    if(!wallyManualAllowed()){ updateWallyDriveUi(); return; }
+    wallyDriveKeys.add(dir);
+    const vel=currentDriveVel();
+    wallyDriveHeld=heldDirName(vel);
+    markDpadHeld();
+    wallyDrivePulse('key-start');
+    if(wallyDriveTimer) clearInterval(wallyDriveTimer);
+    wallyDriveTimer=setInterval(()=>{ if(wallyDriveKeys.size) wallyDrivePulse('heartbeat'); }, WALLY_DRIVE_HEARTBEAT_MS);
+  });
+  window.addEventListener('keyup', ev=>{
+    if(wallyDriveMode!=='keyboard') return;
+    if(isTypingTarget(ev.target)) return;
+    const dir=keyToDir(ev);
+    if(!dir || dir==='stop') return;
+    ev.preventDefault();
+    wallyDriveKeys.delete(dir);
+    const vel=currentDriveVel();
+    if(!vel.active){ wallyDriveStop('keyup'); return; }
+    wallyDriveHeld=heldDirName(vel);
+    markDpadHeld();
+    wallyDrivePulse('key-adjust');
+  });
+  window.addEventListener('blur', ()=>wallyDriveStop('window-blur'));
+  document.addEventListener('visibilitychange', ()=>{ if(document.hidden) wallyDriveStop('hidden'); });
+}
+function releaseSpeedSliderFocus(sl){
+  if(sl && sl.blur) try{ sl.blur(); }catch(e){}
+  if(wallyDriveMode==='keyboard'){
+    const box=$('#wallyDrive');
+    if(box){ try{ box.focus(); box.classList.add('kb-focus'); }catch(e){} }
+  }
+}
+function initWallyDrive(){
+  setWallyDriveMode(wallyDriveMode);
+  setWallyDriveSpeed(wallyDriveSpeed, false);
+  bindWallyDrivePad();
+  bindWallyDriveKeys();
+  const padBtn=$('#wallyDrivePadMode'), keyBtn=$('#wallyDriveKeyMode');
+  if(padBtn) padBtn.onclick=()=>setWallyDriveMode('pad');
+  if(keyBtn) keyBtn.onclick=()=>setWallyDriveMode('keyboard');
+  const sl=$('#wallyDriveSpeed');
+  if(sl){
+    sl.min=String(WALLY_DRIVE_MIN_LIN);
+    sl.max=String(WALLY_DRIVE_MAX_LIN);
+    sl.step='0.002';
+    sl.addEventListener('input', ev=>{ ev.stopPropagation(); setWallyDriveSpeed(ev.target.value, true); });
+    sl.addEventListener('change', ev=>{ ev.stopPropagation(); setWallyDriveSpeed(ev.target.value, true); releaseSpeedSliderFocus(sl); });
+    sl.addEventListener('pointerdown', ev=>ev.stopPropagation());
+    sl.addEventListener('pointerup', ev=>{ ev.stopPropagation(); releaseSpeedSliderFocus(sl); });
+  }
+  const box=$('#wallyDrive');
+  if(box){
+    box.addEventListener('focus', ()=>box.classList.add('kb-focus'));
+    box.addEventListener('blur', ()=>box.classList.remove('kb-focus'));
+  }
+}
+
+
+const YOLO_LABEL_CHIPS=['phone','person','couch','chair','table','dog','cat','wall','door','false positive'];
+function yoloContentRect(img, frameW, frameH, wrap){
+  if(!img) return null;
+  const origin=(wrap||img).getBoundingClientRect();
+  const r=img.getBoundingClientRect();
+  const natW=Number(frameW)||img.naturalWidth||0;
+  const natH=Number(frameH)||img.naturalHeight||0;
+  if(!natW||!natH||!r.width||!r.height) return null;
+  const scale=Math.min(r.width/natW, r.height/natH);
+  const w=natW*scale, h=natH*scale;
+  return {left:(r.left-origin.left)+(r.width-w)/2, top:(r.top-origin.top)+(r.height-h)/2, scale, w, h, natW, natH, rect:r};
+}
+function yoloHitLayout(dets, box){
+  // vision_service.annotate_frame draws the label pill ABOVE the box at
+  // y1 - (textHeight + pad*2) (~22px at 640x400), or inside the box if that
+  // would go off-frame. Hit-testing must include that pill, not just the bbox.
+  const PILL_H=22;
+  const out=[];
+  dets.forEach((d,i)=>{
+    const b=Array.isArray(d.bbox)?d.bbox:null;
+    if(!b||b.length<4) return;
+    const x1=Number(b[0]), y1=Number(b[1]), x2=Number(b[2]), y2=Number(b[3]);
+    if(![x1,y1,x2,y2].every(Number.isFinite)) return;
+    const imgX1=Math.min(x1,x2), imgY1=Math.min(y1,y2), imgX2=Math.max(x1,x2), imgY2=Math.max(y1,y2);
+    const text=`${d.label||'?'} ${(Number(d.conf)||0).toFixed(2)}`;
+    const pillW=Math.max(imgX2-imgX1, 8+text.length*9);
+    let hitX1=imgX1-2, hitY1=imgY1-PILL_H-2, hitX2=Math.max(imgX2, imgX1+pillW)+2, hitY2=imgY2+2;
+    if(imgY1-PILL_H<0) hitY1=imgY1-2;
+    const l=box.left+hitX1*box.scale;
+    const t=box.top+hitY1*box.scale;
+    const w=Math.max(8,(hitX2-hitX1)*box.scale);
+    const h=Math.max(8,(hitY2-hitY1)*box.scale);
+    const pillHcss=Math.max(14, PILL_H*box.scale);
+    out.push({i,l,t,w,h,pillHcss,label:String(d.label||'?'),conf:Number(d.conf)||0,corrected:!!d.corrected,text});
+  });
+  return out;
+}
+function closeYoloPop(){
+  yoloPopIdx=-1;
+  const pop=$('#wallyYoloPop');
+  if(pop){ pop.hidden=true; pop.innerHTML=''; }
+  document.querySelectorAll('.wally-yolo-hit.on').forEach(el=>el.classList.remove('on'));
+}
+function renderYoloHits(){
+  const layer=$('#wallyYoloHits'), img=$('#wallyYoloStream'), wrap=$('#wallyYoloStreamWrap');
+  if(!layer||!img||!wrap) return;
+  if(!yoloOverlayOn || document.body.classList.contains('wally-map-off') || wrap.offsetParent===null){
+    layer.innerHTML=''; layer.hidden=true; delete layer.dataset.hitKey; closeYoloPop(); return;
+  }
+  const dets=((yoloLast&&yoloLast.detections)||[]);
+  const box=yoloContentRect(img, yoloLast&&yoloLast.frame_w, yoloLast&&yoloLast.frame_h, wrap);
+  if(!box||!dets.length){ layer.innerHTML=''; layer.hidden=true; delete layer.dataset.hitKey; if(yoloPopIdx>=0) closeYoloPop(); return; }
+  const layout=yoloHitLayout(dets, box);
+  const key=layout.map(h=>[h.i,Math.round(h.l),Math.round(h.t),Math.round(h.w),Math.round(h.h),h.label,h.corrected?1:0,yoloPopIdx===h.i?1:0].join(',')).join('|');
+  if(layer.dataset.hitKey===key) return;
+  layer.dataset.hitKey=key;
+  layer.hidden=false;
+  layer.innerHTML=layout.map(h=>{
+    const on=yoloPopIdx===h.i?' on':'';
+    const corr=h.corrected?' corrected':'';
+    const pct=Math.round(h.conf*100);
+    return `<button type="button" class="wally-yolo-hit${on}${corr}" data-yi="${h.i}" style="left:${h.l}px;top:${h.t}px;width:${h.w}px;height:${h.h}px" title="${esc(h.label)} ${pct}%${h.corrected?' (corrected)':''}" aria-label="Correct label ${esc(h.label)}"><span class="wally-yolo-pill" style="height:${h.pillHcss}px;line-height:${h.pillHcss}px">${esc(h.label)} ${pct}%</span></button>`;
+  }).join('');
+  if(yoloPopIdx>=0) positionYoloPop();
+}
+function positionYoloPop(){
+  const pop=$('#wallyYoloPop'); if(!pop||pop.hidden) return;
+  const hit=document.querySelector('.wally-yolo-hit.on')||document.querySelector(`.wally-yolo-hit[data-yi="${yoloPopIdx}"]`);
+  const wrap=$('#wallyYoloStreamWrap');
+  const wr=wrap?wrap.getBoundingClientRect():{left:12,right:window.innerWidth-12,top:12,bottom:window.innerHeight-12,width:280};
+  const hr=hit?hit.getBoundingClientRect():wr;
+  const pw=pop.offsetWidth||240, ph=pop.offsetHeight||180;
+  let left=hr.left, top=hr.bottom+6;
+  if(left+pw>wr.right-6) left=Math.max(wr.left+6, wr.right-pw-6);
+  if(top+ph>Math.min(wr.bottom, window.innerHeight)-8) top=Math.max(8, hr.top-ph-6);
+  if(top<8) top=8;
+  if(left<8) left=8;
+  pop.style.left=left+'px';
+  pop.style.top=top+'px';
+}
+function openYoloPop(idx){
+  if(!yoloOverlayOn) return;
+  const dets=((yoloLast&&yoloLast.detections)||[]);
+  const det=dets[idx]; if(!det) return;
+  yoloPopIdx=idx;
+  const pop=$('#wallyYoloPop'); if(!pop) return;
+  const label=String(det.label||'');
+  const conf=Math.round((det.conf||0)*100);
+  pop.hidden=false;
+  pop.innerHTML=`<div class="ylab">Current: <b>${esc(label||'?')}</b> · ${conf}%</div>
+    <input id="wallyYoloLabelIn" type="text" maxlength="80" value="${esc(label)}" placeholder="Correct label" autocomplete="off" spellcheck="false">
+    <div class="ychips">${YOLO_LABEL_CHIPS.map(c=>`<button type="button" class="ychip${c===label?' on':''}" data-lab="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+    <div class="yacts"><button type="button" class="btn" id="wallyYoloCancel">Cancel</button><button type="button" class="btn good" id="wallyYoloSave">Save</button></div>`;
+  renderYoloHits();
+  positionYoloPop();
+  const inp=$('#wallyYoloLabelIn');
+  if(inp){ inp.focus(); inp.select(); }
+  pop.querySelectorAll('.ychip').forEach(ch=>ch.onclick=()=>{
+    pop.querySelectorAll('.ychip').forEach(x=>x.classList.toggle('on', x===ch));
+    if(inp){ inp.value=ch.dataset.lab||''; inp.focus(); }
+  });
+  const cancel=$('#wallyYoloCancel'); if(cancel) cancel.onclick=()=>closeYoloPop();
+  const save=$('#wallyYoloSave'); if(save) save.onclick=()=>saveYoloCorrection(det);
+  if(inp) inp.onkeydown=ev=>{
+    ev.stopPropagation();
+    if(ev.key==='Enter'){ ev.preventDefault(); saveYoloCorrection(det); }
+    if(ev.key==='Escape'){ ev.preventDefault(); closeYoloPop(); }
+  };
+}
+async function saveYoloCorrection(det){
+  const inp=$('#wallyYoloLabelIn');
+  const next=((inp&&inp.value)||'').trim();
+  if(!next){ toast('Enter a corrected label'); if(inp) inp.focus(); return; }
+  const save=$('#wallyYoloSave'); if(save) save.disabled=true;
+  const prev=det.label||'';
+  try{
+    const j=await api('/api/yolo/correct',{
+      old_label:det.original_label||prev,
+      new_label:next,
+      confidence:det.conf,
+      bbox:det.bbox,
+      frame_w:yoloLast&&yoloLast.frame_w,
+      frame_h:yoloLast&&yoloLast.frame_h
+    });
+    if(j&&j.ok){
+      if(!det.original_label) det.original_label=prev;
+      det.label=next;
+      det.corrected=true;
+      toast('Saved correction: '+(prev||'?')+' → '+next);
+      closeYoloPop();
+      const layer=$('#wallyYoloHits'); if(layer) delete layer.dataset.hitKey;
+      renderYoloHits();
+    }else{
+      toast((j&&j.error)||'Save failed');
+      if(save) save.disabled=false;
+    }
+  }catch(e){ toast(e.message||'Save failed'); if(save) save.disabled=false; }
+}
+function initYoloHits(){
+  const layer=$('#wallyYoloHits');
+  const openFromEv=ev=>{
+    const hit=ev.target&&ev.target.closest&&ev.target.closest('.wally-yolo-hit');
+    if(!hit) return false;
+    ev.preventDefault(); ev.stopPropagation();
+    openYoloPop(Number(hit.dataset.yi));
+    return true;
+  };
+  if(layer){
+    // pointerdown so a mid-click detections refresh (which used to rewrite
+    // innerHTML every 800ms) cannot swallow the click event.
+    layer.addEventListener('pointerdown', ev=>{
+      if(ev.button!=null && ev.button!==0) return;
+      openFromEv(ev);
+    });
+    layer.addEventListener('click', ev=>{ openFromEv(ev); });
+  }
+  document.addEventListener('pointerdown', ev=>{
+    const pop=$('#wallyYoloPop');
+    if(!pop||pop.hidden) return;
+    if(pop.contains(ev.target) || (ev.target.closest&&ev.target.closest('.wally-yolo-hit'))) return;
+    closeYoloPop();
+  });
+  window.addEventListener('resize', ()=>{ renderYoloHits(); positionYoloPop(); });
+}
+
+function loadPanelSizes(){
+  try{ const j=JSON.parse(LS('panelSizes')||'null'); return j&&typeof j==='object'?j:{}; }catch(e){ return {}; }
+}
+function savePanelSizes(s){ LSset('panelSizes', JSON.stringify(s||{})); }
+function panelSizeBounds(){
+  const vw=window.innerWidth, vh=window.innerHeight;
+  const gap=14*3+28;
+  return {
+    left:[200, Math.min(420, Math.max(200, vw-620))],
+    right:[240, Math.min(480, Math.max(240, vw-620))],
+    visionW:[320, Math.min(900, Math.max(320, vw-520))],
+    chat:[260, Math.min(640, Math.max(260, vw-1100))],
+    visionH:[280, Math.min(vh-76, Math.max(280, vh-76))]
+  };
+}
+function applyPanelSizes(){
+  const s=loadPanelSizes(), main=document.querySelector('main'), card=$('#pWallyMap');
+  if(!main) return;
+  const set=(k,v)=>{ if(v) main.style.setProperty(k, Math.round(v)+'px'); else main.style.removeProperty(k); };
+  set('--jarvis-left-col', s.left);
+  set('--jarvis-right-col', s.right);
+  set('--jarvis-vision-col', s.visionW);
+  set('--jarvis-chat-col', s.chat);
+  if(card){
+    if(s.visionH){ card.style.setProperty('--jarvis-vision-h', Math.round(s.visionH)+'px'); card.classList.add('sized'); }
+    else { card.style.removeProperty('--jarvis-vision-h'); card.classList.remove('sized'); }
+  }
+  const reset=$('#wallyPanelReset');
+  if(reset) reset.style.display=(s.left||s.right||s.visionW||s.visionH||s.chat)?'':'none';
+  renderYoloHits();
+}
+function resetPanelSizes(){ savePanelSizes({}); applyPanelSizes(); }
+function currentColWidth(sel, fallback){
+  const el=$(sel); const w=el?el.getBoundingClientRect().width:0; return w||fallback;
+}
+function initPanelResize(){
+  const mk=(cls, title, axes, target)=>{
+    const h=document.createElement('div');
+    h.className='jarvis-rh '+cls;
+    h.title=title;
+    h.innerHTML='<i></i>';
+    h.dataset.axes=axes;
+    h.dataset.target=target;
+    return h;
+  };
+  const left=document.querySelector('main > .col.side:not(.right)');
+  const right=document.querySelector('main > .col.side.right');
+  const vision=$('#wallyMapCol'), card=$('#pWallyMap');
+  if(left) left.appendChild(mk('edge-e','Drag to resize the Systems column. Double-click to reset.','ew','left'));
+  const chatCol=document.querySelector('main > .center');
+  if(chatCol) chatCol.appendChild(mk('edge-e','Drag to resize the Jarvis chat column (Wall-E Vision takes the rest). Double-click to reset.','ew','chat'));
+  if(right){
+    right.appendChild(mk('edge-w','Drag to resize the Wally column. Double-click to reset.','ew','right'));
+    right.appendChild(mk('corner se','Drag to resize the Wally column. Double-click to reset.','ew','right'));
+  }
+  if(vision){
+    vision.appendChild(mk('edge-w','Drag to resize Wall-E Vision width. Double-click to reset.','ew','vision'));
+    vision.appendChild(mk('edge-s','Drag to resize Wall-E Vision height. Double-click to reset.','ns','vision'));
+    vision.appendChild(mk('corner sw','Drag to resize Wall-E Vision. Double-click to reset.','both','vision'));
+  }
+  applyPanelSizes();
+  const reset=$('#wallyPanelReset');
+  if(reset) reset.onclick=()=>{ resetPanelSizes(); toast('Panel sizes reset'); };
+  let drag=null;
+  const onMove=ev=>{
+    if(!drag) return;
+    ev.preventDefault();
+    const b=panelSizeBounds();
+    const s=Object.assign({}, loadPanelSizes());
+    const dx=ev.clientX-drag.x, dy=ev.clientY-drag.y;
+    const clamp=(v,lohi)=>Math.min(lohi[1], Math.max(lohi[0], v));
+    if(drag.target==='left' && drag.axes.includes('ew')) s.left=clamp(drag.w+dx, b.left);
+    if(drag.target==='right' && drag.axes.includes('ew')) s.right=clamp(drag.w-dx, b.right);
+    if(drag.target==='chat') s.chat=clamp(drag.w+dx, b.chat);
+    if(drag.target==='vision' && drag.axes.includes('ew')){ if(window.innerWidth>1100) s.chat=clamp(drag.cw+dx, b.chat); else s.visionW=clamp(drag.w-dx, b.visionW); }
+    if(drag.target==='vision' && drag.axes.includes('ns')) s.visionH=clamp(drag.h+dy, b.visionH);
+    savePanelSizes(s); applyPanelSizes();
+  };
+  const onUp=()=>{
+    if(!drag) return;
+    document.body.classList.remove('resizing-panels','ew','ns','nesw','nwse');
+    if(drag.handle) drag.handle.classList.remove('drag');
+    drag=null;
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+  };
+  document.addEventListener('pointerdown', ev=>{
+    const handle=ev.target.closest && ev.target.closest('.jarvis-rh');
+    if(!handle) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const target=handle.dataset.target;
+    const axes=handle.dataset.axes==='both'?'ewns':handle.dataset.axes;
+    const w=target==='chat'?currentColWidth('main > .center', 340):target==='left'?currentColWidth('main > .col.side:not(.right)', 290)
+      :target==='right'?currentColWidth('main > .col.side.right', 320)
+      :currentColWidth('#wallyMapCol', 460);
+    const h=(card||vision)?(card||vision).getBoundingClientRect().height:400;
+    drag={handle, target, axes, x:ev.clientX, y:ev.clientY, w, h, cw:currentColWidth('main > .center', 340)};
+    handle.classList.add('drag');
+    document.body.classList.add('resizing-panels');
+    document.body.classList.add(handle.classList.contains('sw')?'nesw':handle.classList.contains('se')?'nwse':axes==='ns'?'ns':'ew');
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  });
+  document.addEventListener('dblclick', ev=>{
+    const handle=ev.target.closest && ev.target.closest('.jarvis-rh');
+    if(!handle) return;
+    ev.preventDefault();
+    const s=loadPanelSizes(), t=handle.dataset.target, axes=handle.dataset.axes||'';
+    if(t==='left') delete s.left;
+    if(t==='chat') delete s.chat;
+    if(t==='right') delete s.right;
+    if(t==='vision' && (axes==='ew'||axes==='both')){ delete s.visionW; delete s.chat; }
+    if(t==='vision' && (axes==='ns'||axes==='both')) delete s.visionH;
+    savePanelSizes(s); applyPanelSizes(); toast('Panel size reset');
+  });
+  window.addEventListener('resize', ()=>{ applyPanelSizes(); });
+}
+
+// ---------- Wall-E two-way intercom (half duplex, audio only: never arms or drives) ----------
+// PC mic -> /api/intercom/ws -> Jarvis -> gb-intercom on the Pi -> Wall-E speaker (TALK)
+// Wall-E mic (shared gbmic) -> Pi -> Jarvis -> this page -> PC speakers (LISTEN). 16 kHz mono S16_LE both ways.
+const IC_RATE=16000, IC_HANG_MS=1200, IC_PRE_BLOCKS=15, IC_THR_DB=Math.max(-70,Math.min(-15,Number(LS('icVadDb'))||-30));   // cap; real threshold = noise floor + 10 dB
+const IC={state:'off',mode:LS('icMode')==='ptt'?'ptt':'auto',ws:null,ctx:null,stream:null,node:null,gain:null,pre:[],voiced:0,quietMs:0,
+  playT:0,pcDb:-90,botDb:-90,floor:-60,agc:1,gate:0.06,thrOn:-48,talkT0:0,burstPeak:-90,lastBot:0,held:false,ping:null,raf:0,msgT:0,chatMicWasOn:false,srcs:new Set()};
+const IC_WORKLET=`class P extends AudioWorkletProcessor{constructor(){super();this.n=Math.round(sampleRate*0.02);this.b=new Float32Array(this.n);this.i=0}
+process(inp){const c=inp[0]&&inp[0][0];if(c){for(let k=0;k<c.length;k++){this.b[this.i++]=c[k];if(this.i>=this.n){this.port.postMessage(this.b.slice(0));this.i=0}}}return true}}
+registerProcessor('ic-cap',P);`;
+function icDb(f32){let s=0;for(let i=0;i<f32.length;i++)s+=f32[i]*f32[i];return 20*Math.log10(Math.sqrt(s/Math.max(1,f32.length))+1e-9)}
+function icMsg(t,ms){const m=$('#wallyIcMsg');if(!m)return;clearTimeout(IC.msgT);if(!t){m.hidden=true;return}m.textContent=t;m.hidden=false;if(ms)IC.msgT=setTimeout(()=>{m.hidden=true},ms)}
+function icSet(st){
+  IC.state=st;
+  const dir=$('#wallyIcDir'),mic=$('#wallyIcMic'),off=$('#wallyIcOff');
+  const txt={off:'Intercom off',conn:'Connecting…',listen:'Listening ← Wall-E',talk:'Talking → Wall-E'}[st]||st;
+  if(dir){dir.textContent=txt;dir.className='wally-ic-dir '+({conn:'conn',listen:'listen',talk:'talk'}[st]||'')}
+  if(mic){mic.classList.toggle('on',st==='listen'||st==='conn');mic.classList.toggle('talk',st==='talk');
+    mic.setAttribute('aria-pressed',st==='off'?'false':'true');
+    mic.title=IC.mode==='ptt'?(st==='off'?'Push-to-talk: hold to talk to whoever is near Wall-E (opens the intercom), release to listen through Wall-E\'s mic.':'Push-to-talk: hold to talk, release to listen. ✕ turns the intercom off.')
+      :(st==='off'?'Intercom off. Click to open two-way audio with Wall-E: you talk → Wall-E\'s speaker; when you stop (~0.9 s silence) → Wall-E\'s mic plays here.':'Intercom on (Auto-VAD). Just speak to talk through Wall-E; stop to listen. Click to turn the intercom off.')}
+  if(off)off.hidden=st==='off';
+}
+function icSendJ(o){try{if(IC.ws&&IC.ws.readyState===1)IC.ws.send(JSON.stringify(o))}catch(e){}}
+function icFlushPlayback(){for(const s of IC.srcs){try{s.stop()}catch(e){}}IC.srcs.clear();IC.playT=0}
+function icTalk(){
+  if(IC.state!=='listen')return;
+  icSet('talk');IC.quietMs=0;IC.talkT0=performance.now();IC.burstPeak=-90;icFlushPlayback();icSendJ({op:'mode',mode:'talk'});
+  if(IC.ws&&IC.ws.readyState===1)for(const b of IC.pre)IC.ws.send(b);   // ~300 ms pre-roll so the first syllable isn't clipped
+  IC.pre=[];
+}
+function icListen(){if(IC.state!=='talk')return;icSet('listen');IC.voiced=0;icSendJ({op:'mode',mode:'listen'});
+  if(IC.burstPeak<-48&&IC.burstPeak>-90)icMsg('Your PC mic is very quiet ('+Math.round(IC.burstPeak)+' dBFS peak). Move closer or raise the mic level in Windows Sound settings.',7000)}
+function icBlock(f32){
+  if(!IC.ctx)return;
+  const db=icDb(f32);IC.pcDb=db;
+  const pn=performance.now();if(pn-(IC.lastPing||0)>1000){IC.lastPing=pn;icSendJ({op:'ping',t:Date.now()})}   // audio-thread keepalive (immune to background-tab timer throttling)
+  // Noise floor (fast down, slow up; frozen while talking). Digital silence (mic warming up) is ignored, floor clamped to [-70,-38].
+  if(IC.state!=='talk'&&db>-100)IC.floor+=(db-IC.floor)*(db<IC.floor?0.2:0.01);
+  IC.floor=Math.max(-70,Math.min(-38,IC.floor));
+  let thrOn=Math.min(IC_THR_DB,Math.max(-50,IC.floor+12));                       // speech must be >=12 dB over the room and >=-50 dBFS
+  if(IC.state==='listen'&&pn-IC.lastBot<400)thrOn=Math.max(thrOn,IC.botDb-8);    // echo guard while Wall-E plays here
+  const thrOff=thrOn-4;IC.thrOn=thrOn;
+  const speech=db>thrOff;
+  // Outgoing AGC (speech blocks only): target ~-20 dBFS, at most +15.6 dB, never boosts the noise floor.
+  if(IC.state==='talk'&&db>thrOn){const want=Math.pow(10,(-20-db)/20);IC.agc+=(Math.max(1,Math.min(6,want))-IC.agc)*0.15;IC.burstPeak=Math.max(IC.burstPeak,db)}
+  // Noise gate: gaps between words go out at -24 dB so Wall-E's speaker never hisses with room noise.
+  const tg=speech?IC.agc:0.06;IC.gate+=(tg-IC.gate)*(speech?0.6:0.3);
+  const n=f32.length,out=new Int16Array(320),r=n/320,g=IC.gate;               // 20 ms block -> 320 samples @ 16 kHz (box average)
+  for(let j=0;j<320;j++){const a=Math.floor(j*r),b=Math.max(a+1,Math.floor((j+1)*r));let s=0;for(let k=a;k<b;k++)s+=f32[k];const v=Math.max(-0.9,Math.min(0.9,s/(b-a)*g));out[j]=Math.round(v*32767)}
+  const buf=out.buffer;
+  if(IC.state==='talk'){if(IC.ws&&IC.ws.readyState===1&&IC.ws.bufferedAmount<64000)IC.ws.send(buf)}
+  else{IC.pre.push(buf);if(IC.pre.length>IC_PRE_BLOCKS)IC.pre.shift()}
+  if(IC.mode==='ptt'){if(IC.held&&IC.state==='listen')icTalk();else if(!IC.held&&IC.state==='talk')icListen();return}
+  if(IC.state==='listen'){IC.voiced=db>thrOn?IC.voiced+1:0;if(IC.voiced>=3)icTalk()}
+  else if(IC.state==='talk'){IC.quietMs=speech?0:IC.quietMs+20;if((IC.quietMs>=IC_HANG_MS&&pn-IC.talkT0>800)||pn-IC.talkT0>30000)icListen()}   // 30 s cap: never stuck talking
+}
+function icPlay(ab){
+  if(IC.state!=='listen'||!IC.ctx)return;
+  const i16=new Int16Array(ab),f=new Float32Array(i16.length);for(let i=0;i<i16.length;i++)f[i]=i16[i]/32768;
+  IC.botDb=icDb(f);IC.lastBot=performance.now();
+  const b=IC.ctx.createBuffer(1,f.length,IC_RATE);b.copyToChannel(f,0);
+  const s=IC.ctx.createBufferSource();s.buffer=b;s.connect(IC.gain);
+  const now=IC.ctx.currentTime;if(IC.playT<now+0.04||IC.playT>now+0.6)IC.playT=now+0.12;    // small jitter buffer, drop backlog
+  s.start(IC.playT);IC.playT+=b.duration;IC.srcs.add(s);s.onended=()=>IC.srcs.delete(s);
+}
+function icMeters(){
+  const w=db=>Math.max(0,Math.min(100,(db+60)/60*100))+'%';
+  const pc=$('#wallyIcMeterPc i'),bot=$('#wallyIcMeterBot i');
+  if(IC.state==='off'){if(pc)pc.style.width='0%';if(bot)bot.style.width='0%';IC.raf=0;return}
+  if(pc)pc.style.width=w(IC.pcDb);
+  const tk=$('#wallyIcThr');if(tk)tk.style.left=w(IC.thrOn);
+  if(bot)bot.style.width=performance.now()-IC.lastBot<250?w(IC.botDb):'0%';
+  IC.raf=requestAnimationFrame(icMeters);
+}
+async function icStart(){
+  if(IC.state!=='off')return;
+  icMsg('');
+  if(!window.isSecureContext||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    icMsg('Microphone blocked: this page is not a secure context. Open http://localhost:8765 (or http://127.0.0.1:8765) and press Ctrl+F5.');return}
+  if(!window.AudioWorkletNode||!window.WebSocket){icMsg('This browser lacks AudioWorklet/WebSocket. Use current Edge, Chrome or Brave.');return}
+  icSet('conn');
+  try{IC.stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}})}
+  catch(e){icSet('off');icMsg(e&&e.name==='NotAllowedError'?'Microphone permission denied. Click the lock/mic icon in the address bar → Allow microphone, then click the mic again.'
+    :e&&e.name==='NotFoundError'?'No microphone found on this PC.':'Microphone error: '+((e&&e.message)||e));return}
+  if(typeof micArmed!=='undefined'&&micArmed){IC.chatMicWasOn=true;micArmed=false;clearTimeout(micResumeTimer);stopCapture();setMicUi();toast('Jarvis voice input paused while the intercom is on')}
+  try{
+    IC.ctx=new AudioContext({latencyHint:'interactive'});await IC.ctx.resume();
+    const url=URL.createObjectURL(new Blob([IC_WORKLET],{type:'application/javascript'}));
+    await IC.ctx.audioWorklet.addModule(url);URL.revokeObjectURL(url);
+    const src=IC.ctx.createMediaStreamSource(IC.stream);IC.node=new AudioWorkletNode(IC.ctx,'ic-cap');
+    const mute=IC.ctx.createGain();mute.gain.value=0;src.connect(IC.node);IC.node.connect(mute);mute.connect(IC.ctx.destination);
+    IC.node.port.onmessage=e=>icBlock(e.data);
+    IC.gain=IC.ctx.createGain();IC.gain.gain.value=1.6;IC.gain.connect(IC.ctx.destination);
+  }catch(e){icStop('audio setup failed: '+((e&&e.message)||e));return}
+  const ws=new WebSocket(`ws://${location.host}/api/intercom/ws`);ws.binaryType='arraybuffer';IC.ws=ws;
+  ws.onmessage=ev=>{
+    if(ws!==IC.ws)return;
+    if(typeof ev.data!=='string')return icPlay(ev.data);
+    let m={};try{m=JSON.parse(ev.data)}catch(e){return}
+    if(m.op==='state'){
+      if(m.state==='listen'&&IC.state==='conn'){icSet('listen');if(IC.mode==='ptt'&&IC.held)icTalk()}
+      else if(m.state==='off')icStop(m.why||'closed',true);
+    }else if(m.op==='warn')icMsg(m.msg,4000);
+  };
+  ws.onclose=()=>{if(ws===IC.ws)icStop(IC.state==='conn'?'could not reach Wall-E intercom (is gb-intercom running?)':'connection closed',true)};
+  IC.ping=setInterval(()=>icSendJ({op:'ping',t:Date.now()}),1000);
+  if(!IC.raf)IC.raf=requestAnimationFrame(icMeters);
+}
+function icStop(why,remote){
+  const was=IC.state;
+  if(IC.ws){const ws=IC.ws;IC.ws=null;try{if(ws.readyState===1)ws.send(JSON.stringify({op:'stop'}))}catch(e){}try{ws.close()}catch(e){}}
+  clearInterval(IC.ping);IC.ping=null;icFlushPlayback();
+  try{IC.node&&IC.node.port&&(IC.node.port.onmessage=null)}catch(e){}
+  try{IC.stream&&IC.stream.getTracks().forEach(t=>t.stop())}catch(e){}
+  try{IC.ctx&&IC.ctx.close()}catch(e){}
+  IC.stream=IC.ctx=IC.node=IC.gain=null;IC.floor=-60;IC.agc=1;IC.gate=0.06;IC.pre=[];IC.voiced=0;IC.quietMs=0;IC.held=false;IC.pcDb=IC.botDb=-90;
+  icSet('off');
+  if(remote&&was!=='off'&&why&&!/user turned/.test(why))icMsg('Intercom ended: '+why,8000);
+  if(IC.chatMicWasOn){IC.chatMicWasOn=false;micArmed=true;setMicUi();scheduleMicResume()}
+}
+function icSetMode(m){
+  IC.mode=m==='ptt'?'ptt':'auto';LSset('icMode',IC.mode);
+  document.querySelectorAll('#wallyIcModeToggle button').forEach(b=>b.classList.toggle('on',b.dataset.icmode===IC.mode));
+  if(IC.state==='talk')icListen();
+  icSet(IC.state);
+}
+function initIntercom(){
+  const mic=$('#wallyIcMic');if(!mic)return;
+  const thr=$('#wallyIcThr');if(thr)thr.style.left=Math.max(0,Math.min(100,(IC_THR_DB+60)/60*100))+'%';
+  document.querySelectorAll('#wallyIcModeToggle button').forEach(b=>b.onclick=()=>icSetMode(b.dataset.icmode));
+  $('#wallyIcOff').onclick=()=>icStop('user turned intercom off');
+  mic.addEventListener('click',()=>{if(IC.mode!=='auto')return;IC.state==='off'?icStart():icStop('user turned intercom off')});
+  const down=ev=>{if(IC.mode!=='ptt'||(ev.button!=null&&ev.button!==0))return;ev.preventDefault();try{mic.setPointerCapture(ev.pointerId)}catch(e){}
+    IC.held=true;if(IC.state==='off')icStart();else if(IC.state==='listen')icTalk()};
+  const up=()=>{if(!IC.held)return;IC.held=false;if(IC.state==='talk')icListen()};
+  mic.addEventListener('pointerdown',down);mic.addEventListener('pointerup',up);mic.addEventListener('pointercancel',up);mic.addEventListener('lostpointercapture',up);
+  window.addEventListener('blur',up);
+  window.addEventListener('pagehide',()=>{if(IC.state!=='off')icStop('page closed')});
+  icSetMode(IC.mode);icSet('off');
+}
+
+$('#wallyYoloOverlayBtn').onclick=()=>setYoloOverlay(!yoloOverlayOn);
+$('#wallyMapReload').onclick=()=>pingWallyMap(true);
+$('#wallyMapMin').onclick=()=>setWallyMap(false);
+$('#tWallyMap').onclick=()=>setWallyMap(document.body.classList.contains('wally-map-off'));
+
+(async()=>{setTog('#tVoice',voiceOn);setFocus(focusOn);setMicMode(micMode);
+  try{await loadConfig()}catch(e){}
+  try{const st=await fetch('/api/shell-agent/status').then(r=>r.json());if(st&&st.label)$('#shellIndLabel').textContent=st.label}catch(e){$('#shellIndLabel').textContent='Shell Agent: unavailable'}
+  setWallyMap(true);setYoloOverlay(yoloOverlayOn);refreshYoloDets();initWallyDrive();initYoloHits();initPanelResize();initIntercom();
+  try{ const yw=$('#wallyYoloStreamWrap'); if(yw&&window.ResizeObserver) new ResizeObserver(()=>renderYoloHits()).observe(yw); }catch(e){}
+  refreshStatus();refreshWaiting();refreshHistory();refreshRobot();refreshWally();pingWallyMap(false);
+  setInterval(refreshStatus,5000);setInterval(refreshRobot,ROBOT_POLL_MS);setInterval(refreshWally,WALLY_POLL_MS);
+  wallyMapTimer=setInterval(()=>{if(!document.body.classList.contains('wally-map-off')) pingWallyMap(false)},5000);
+  yoloTimer=setInterval(refreshYoloDets,800);
+  const h=new Date().getHours();$('#answer').textContent=`Good ${h<12?'morning':h<18?'afternoon':'evening'}, John. All systems are on the left.`;
+  setTimeout(()=>{$('#splash').style.opacity=0;setTimeout(()=>$('#splash').remove(),500)},700);$('#input').focus();
+})();
+</script>
+</body>
+</html>

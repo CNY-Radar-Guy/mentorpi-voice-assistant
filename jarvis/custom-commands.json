@@ -1,0 +1,20 @@
+{
+  "commands": [
+    {
+      "label": "Wally status",
+      "prompt": "Check Wally's status using the control_wally tool and tell me his battery, mode, whether he is armed, and anything notable, in one or two spoken sentences."
+    },
+    {
+      "label": "Vacuum status",
+      "prompt": "Check the Roborock vacuum status using the control_roborock tool and tell me the result in one or two spoken sentences."
+    },
+    {
+      "label": "Vacuum rooms",
+      "prompt": "List the named rooms on the Roborock map using the control_roborock tool and tell me the names in a short spoken sentence."
+    },
+    {
+      "label": "Watcher status",
+      "prompt": "Check the Roborock mop watcher status using the control_roborock tool and tell me whether it is armed, in one or two spoken sentences."
+    }
+  ]
+}

@@ -1,8 +1,8 @@
 # Jarvis and Wall-E
 
-John Gustafson's working notes for a tracked rover built with two kinds of AI at once: a centralized partner for design and diagnosis, and a local model that stays on the workbench.
+John's working notes for a tracked rover built with two kinds of AI at once: a centralized partner for design and diagnosis, and a local model that stays on the workbench.
 
-The robot is **Wall-E** (Wally), a Hiwonder MentorPi. The console in front of it is **Jarvis**, on a salvaged workstation named **ALPHA-ONE**. This page is the project intro. The voice-stack source from November 5–7, 2026 is on GitHub. Most of what the screenshots show is running on the machines and is not in this repository yet.
+The robot is **Wall-E** (Wally), a Hiwonder MentorPi. The console in front of it is **Jarvis**, on a salvaged workstation named **ALPHA-ONE**. This page is the project intro. As of November 27, 2026 the live Wall-E code (Pi release `e48d3d8`) and the Jarvis console code from ALPHA-ONE are both in this repository under [`wall-e/`](wall-e/) and [`jarvis/`](jarvis/).
 
 ## A hybrid way to build
 
@@ -13,6 +13,32 @@ Everyday AI tasks are one end of what these systems can do. This project explore
 **Qwen** (`qwen3:14b`) runs locally through **Ollama** on ALPHA-ONE, a salvaged workstation with an RTX 5080. Putting the model there takes the heavy compute off the MentorPi, toward longer-term self-sufficiency: more of the rover's work can stay in the room.
 
 Central and local AI working together is the practical pattern this project is testing.
+
+## An iterative, ground-up build
+
+This is not a kit demo or a finished product. Wall-E and Jarvis are being built from the ground up, one real-world failure at a time: John drives or sends the robot on a mission, something goes wrong on a real floor, the cause is diagnosed from logs and sensor data, a fix plus unit tests is deployed to the Pi, and the next run tests it again. The code in this repository is a snapshot of that loop, not a polished release. See [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md) for the full list of lessons.
+
+### Lessons learned so far
+
+- **Guard-bump false stalls from silent LiDAR dropouts.** The LiDAR node can stop publishing without crashing. The safety guard then keeps acting on the last (stale) scan, for example a 0.19 m "obstacle" in front, and blocks motion, which shows up as "guard bump" or "I held still" even during manual drive. Restarting the LiDAR node restores fresh scans and clears the block. Related fixes: the dropout creep (`0.04 m/s`) no longer counts as a stall (`STALL_MIN_CMD` raised to `0.05 m/s`), and stale trips are cleared on startup, disarm, and after `2.0 s` idle.
+- **Obstacle reposition and continuous nudge recovery.** In tight spaces Wall-E backs off and repositions instead of giving up, then keeps making slow, sensor-checked nudges toward the clearest sector until he has room to continue the mission.
+- **Temporary, camera-verified clearance reduction for tight spots.** Between chair or table legs the normal LiDAR stop rules can report "too close" even when a real gap wider than the chassis exists. The shared fusion recovery module ([`wall-e/gb_fusion_recovery.py`](wall-e/gb_fusion_recovery.py)) lets a stuck mission (explore or go-to-destination) halve the side margin and squeeze through with slow micro-nudges, but only when the depth camera confirms floor and a clear path, YOLO shows no solid or animate hazard, and the LiDAR points in the way are narrow legs. The gate re-checks every nudge independently, reverse is never relaxed, and the normal clearances are restored automatically once Wall-E is clear.
+- **Wake persistence after missions.** After a mission Wall-E now stays awake and listening until he is powered off or put into bench mode (plugged in), instead of dropping back to sleep and needing the wake word again.
+- **Two-way Jarvis ↔ Wall-E intercom and a bigger Vision UI.** A half-duplex intercom ([`wall-e/intercom/gb_intercom.py`](wall-e/intercom/gb_intercom.py) on the Pi, [`jarvis/wally-intercom.js`](jarvis/wally-intercom.js) on ALPHA-ONE) sends John's voice to Wall-E's speaker while he talks and switches to Wall-E's onboard mic when he stops (Auto-VAD or push-to-talk, with a noise gate and capped speech boost). With the intercom off, Wall-E returns to normal dual-listen mode. The Jarvis layout now gives the Wall-E Vision panel most of the screen.
+
+## Repository layout
+
+| Path | What it is |
+| --- | --- |
+| `wall-e/` | Python code running on Wall-E's Raspberry Pi 5 (release `e48d3d8`): voice (`grokbot_voice.py`), explore and missions (`gb_explore.py`), fusion stuck-recovery (`gb_fusion_recovery.py`), obstacle and stop rules (`gb_obstacle.py`), ESTOP, wake gate, mapping, follow, low-voltage, arm and more |
+| `wall-e/gb_safety/` | Independent safety gate (`gb_gate.py`), RGB guard, watchdog, clap detector, and their run scripts |
+| `wall-e/intercom/` | Two-way intercom daemon |
+| `wall-e/systemd/` | systemd units and drop-ins as installed on the Pi (secrets are loaded from files that are not in this repo) |
+| `wall-e/tests/` | Unit tests, including the November 27 fusion-recovery and stay-awake tests |
+| `jarvis/` | Jarvis local ops console on ALPHA-ONE: `server.js`, `public/index.html`, the `wally-*.js` Wall-E modules (drive, battery, intercom, tool), the orchestrator, and `tools/wally/remote.py` |
+| `docs/` | Build log and screenshots |
+
+Not included on purpose: runtime data, logs, audio, model weights (`*.onnx`), `.bak` backups, `__pycache__`, the Pi's `grokbot.env` / `secrets.env`, Jarvis `data/`, the browser profile, and the Roborock helper. Use `wall-e/grokbot.env.example` as the template for local settings.
 
 ## Hardware and stack
 
@@ -49,7 +75,7 @@ The overlay in these frames is classifying incorrectly (a chair comes back as `t
 
 ## Verified timeline
 
-The split below is deliberate. November 5–7 is the voice foundation GitHub holds. The Jarvis console, the November 26 gate fixes, and the behavior in both screenshots are live on the Pi and on ALPHA-ONE, and that code is waiting for the next full sync. The pictures themselves are in this repository.
+November 5–7 is the original voice foundation. Everything after that was built live on the Pi and on ALPHA-ONE and was synced into `main` on November 27, 2026.
 
 ### November 5–7, 2026 — on GitHub
 
@@ -62,7 +88,7 @@ The voice-controlled rover foundation is also on GitHub, on [`cursor/publish-men
 - identity phrase: `I am John` (the voice code treats this as identity, not as a credential)
 - WonderEcho hardware wake: `Hello Hiwonder` (the factory firmware phrase; this tree does not reflash that chip)
 
-`main` does not contain that tree yet. Most work after November 7 is live on the Pi and on ALPHA-ONE, awaiting the next full code sync.
+The post–November 7 tree now lives on `main` under `wall-e/` and `jarvis/`.
 
 ### November 7–23, 2026 — local on ALPHA-ONE and the Pi
 
@@ -72,13 +98,20 @@ The voice-controlled rover foundation is also on GitHub, on [`cursor/publish-men
 
 Those stop distances and the deadman are in the published gate (`STOP_FWD` / `STOP_REV` / `SWEEP_R` in `gb_obstacle.py` on that branch). The speed split and the stall-latch fix below are local to the Pi.
 
-### November 26, 2026 — local on Jarvis and the Pi
+### November 26, 2026 — Jarvis and the Pi
 
 - Live LiDAR viewer on Jarvis.
 - FPV plus a YOLO overlay, with click-to-label and auto-reconnect. The running model is `rfdetr_nano` at 10.9 FPS. The labels in the frames above are wrong, and the model is queued for a replacement (YOLOE, or custom household classes).
 - A 3×3 combined-axis diagonal D-pad, keyboard combinations for the diagonals, and a fix so the speed slider keeps focus.
 - Split speed caps. Manual drive has a hard cap of `0.288 m/s`. Autonomous explore has a hard cap of `1.0 m/s`, starts at a `0.1012 m/s` cruise, and may pick up speed in `0.10 m/s` steps only while the sensors still allow the step. Stop distances are unchanged.
 - A stuck `"guard bump detected"` latch was diagnosed and fixed, then checked at 8:00 PM PT. During a LiDAR dropout the gate creeps at `0.04 m/s`. `STALL_MIN_CMD` was `0.03 m/s`, so that creep looked like a stall, and the trip file was never cleared. The fix calls `clear_trip()` on startup, on disarm, and after `2.0 s` idle, and raises `STALL_MIN_CMD` to `0.05 m/s`. The published tree still has `STALL_MIN_CMD = 0.03`.
+
+### November 27, 2026 — synced to `main`
+
+- Silent LiDAR dropout diagnosed as the cause of a manual-drive block ("I held still"): the guard was holding a stale 0.19 m front reading. LiDAR node restarted; fresh scans cleared the guard.
+- Shared LiDAR + camera fusion stuck recovery with temporary halved side margin for tight squeezes, used by explore and go-to-destination missions, re-verified by the gate (`gb_fusion_recovery.py`, `gb_explore.py`, `gb_safety/gb_gate.py`).
+- Stay-awake after missions until bench mode or power-off (`grokbot_voice.py`).
+- Two-way intercom between Jarvis and Wall-E's speaker and mic, and the resized Jarvis layout.
 
 ## Limits and safety
 
@@ -103,7 +136,7 @@ Numbers in force on the Pi as of the November 26 evening check. Stop distances a
 
 ## What's next
 
-- Sync the post–November 7 Pi and Jarvis code into this repository. `main` and the November 7 branch both stop short of the console and the November 26 gate fixes.
+- Keep syncing each round of real-world fixes into this repository.
 - Replace `rfdetr_nano` with a stronger detector: YOLOE, or a model trained on household classes. The overlay in the November 26 frames mislabels ordinary room objects.
 - A Wall-E charging dock beside the vacuum, with QR alignment and a log of battery cycles.
 - Return-to-start that uses the LiDAR and the FPV camera together.
@@ -119,4 +152,4 @@ Before this page, `main` held only the original README:
 Voice-controlled Hiwonder MentorPi tracked rover with Grok Bot as the onboard AI brain
 ```
 
-The November 5–7 technical reference — kit notes, setup, the voice-stack architecture diagram, the wake-phrase table, and configuration — is the README on [`cursor/publish-mentorpi-voice-8581`](https://github.com/CNY-Radar-Guy/mentorpi-voice-assistant/blob/cursor/publish-mentorpi-voice-8581/README.md). Install steps for Jarvis, and for the Pi tree as it actually runs after November 7, belong with that code sync. They are not written here ahead of the tree.
+The November 5–7 technical reference — kit notes, setup, the voice-stack architecture diagram, the wake-phrase table, and configuration — is the README on [`cursor/publish-mentorpi-voice-8581`](https://github.com/CNY-Radar-Guy/mentorpi-voice-assistant/blob/cursor/publish-mentorpi-voice-8581/README.md). The post–November 7 Pi tree is in `wall-e/` and the Jarvis console is in `jarvis/` (see `jarvis/README.txt`).

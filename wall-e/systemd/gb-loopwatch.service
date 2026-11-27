@@ -1,0 +1,17 @@
+[Unit]
+Description=Grok Bot restart-loop watchdog (alerts; restarts only voice/health; never touches gate, ESTOP or motion)
+After=multi-user.target docker.service grokbot.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/pi/grokbot
+EnvironmentFile=/home/pi/grokbot/grokbot.env
+Environment=PYTHONUNBUFFERED=1 HOME=/home/pi GB_DATA=/home/pi/grokbot/data GB_DIR=/home/pi/grokbot GB_SHARED_ESTOP=/home/pi/docker/tmp/gb_safety/ESTOP LOOPWATCH_DRY=0
+ExecStart=/usr/bin/nice -n 15 /home/pi/grokbot/venv/bin/python /home/pi/grokbot/gb_loopwatch.py
+Restart=on-failure
+RestartSec=30
+CPUQuota=5%
+
+[Install]
+WantedBy=multi-user.target

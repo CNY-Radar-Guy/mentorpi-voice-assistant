@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "note": "Editable routing, model-tier, and specialist policy for the Jarvis orchestrator. Phase 1 is standalone; do not edit server.js until GB-15 finishes.",
+  "ollama_base_url": "http://127.0.0.1:11434",
+  "host": {
+    "name": "ALPHA-ONE",
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "vram_budget_mb": 16384,
+    "vram_reserve_mb": 1536,
+    "system_ram_mb": 32215,
+    "cpu": "Intel Core Ultra 7 265K",
+    "cores": 20,
+    "jarvis_root": "D:\\AI-Models\\jarvis"
+  },
+  "fit_policy": "prefer_in_vram",
+  "allow_partial_offload": false,
+  "reuse_loaded_if_compatible": true,
+  "router": {
+    "fast_path_confidence": 0.75,
+    "followup_confidence": 0.8,
+    "max_prompt_chars": 1200,
+    "temperature": 0
+  },
+  "model_tiers": {
+    "fast_router": {
+      "preferred_models": ["qwen3.5:4b", "qwen3:14b", "phi4:latest", "phi4"],
+      "num_ctx": 2048,
+      "num_predict": 120,
+      "keep_alive": "5m",
+      "think": false,
+      "temperature": 0,
+      "notes": "Prefer already-loaded qwen3:14b over swapping in the 4B when Jarvis is warm. Cold start uses qwen3.5:4b (3.3 GB, already installed)."
+    },
+    "general_chat": {
+      "preferred_models": ["qwen3:14b", "phi4:latest", "phi4", "mistral-small:24b"],
+      "num_ctx": 4096,
+      "keep_alive": "5m",
+      "think": false,
+      "temperature": 0.6
+    },
+    "deep_coder": {
+      "preferred_models": ["qwen2.5-coder:32b", "qwen3:14b", "phi4:latest", "phi4"],
+      "num_ctx": 8192,
+      "num_ctx_max": 16384,
+      "keep_alive": "5m",
+      "think": false,
+      "temperature": 0.2,
+      "notes": "qwen2.5-coder:32b is 19 GB and will not fit in 16 GB VRAM. With fit_policy=prefer_in_vram the scheduler falls back to qwen3:14b unless allow_partial_offload is true or the caller forces the 32B model."
+    },
+    "tool_caller": {
+      "preferred_models": ["qwen3:14b", "qwen3.5:4b", "phi4:latest", "phi4"],
+      "num_ctx": 4096,
+      "keep_alive": "5m",
+      "think": false,
+      "temperature": 0.2
+    },
+    "deep_reasoner": {
+      "preferred_models": ["deepseek-r1:14b", "qwen3:14b", "deepseek-r1:32b"],
+      "num_ctx": 4096,
+      "keep_alive": "0",
+      "think": true,
+      "temperature": 0.4,
+      "notes": "deepseek-r1:32b is 19 GB (offload). Default to the 14B which fits the 5080."
+    }
+  },
+  "model_weights_mb": {
+    "llama3.3:70b": 42000,
+    "qwen2.5-coder:32b": 19000,
+    "deepseek-r1:32b": 19000,
+    "qwen3:32b": 20000,
+    "gemma3:27b": 17000,
+    "mistral-small:24b": 14000,
+    "phi4:latest": 9100,
+    "phi4": 9100,
+    "deepseek-r1:14b": 9000,
+    "qwen3:14b": 9300,
+    "qwen3.5:4b": 3300
+  },
+  "heavy_models": [
+    "llama3.3:70b",
+    "qwen2.5-coder:32b",
+    "deepseek-r1:32b",
+    "qwen3:32b",
+    "gemma3:27b"
+  ],
+  "specialists": {
+    "shell-agent": {
+      "id": "shell-agent",
+      "title": "Guarded shell agent",
+      "card": "Local commands and software installs on ALPHA-ONE. Delegates to the guarded shell-agent (Tier 1 auto-safe / Tier 2 click-to-approve). Never bypasses approval.",
+      "tier": "tool_caller",
+      "adapter": "shell-agent",
+      "aliases": ["shell", "sh", "install"],
+      "max_ctx": 4096
+    },
+    "coder": {
+      "id": "coder",
+      "title": "Coder",
+      "card": "Code generation, debugging, OpenSCAD, scripts, and diffs. Higher num_ctx only when the task needs it.",
+      "tier": "deep_coder",
+      "adapter": "ollama",
+      "aliases": ["code", "dev", "programmer"],
+      "max_ctx": 8192
+    },
+    "researcher": {
+      "id": "researcher",
+      "title": "Web researcher",
+      "card": "URL and web-search synthesis using Jarvis's existing Brave authorize-then-fetch flow. Read-only; no forms or logins.",
+      "tier": "tool_caller",
+      "adapter": "web",
+      "aliases": ["research", "web", "search", "web-research"],
+      "max_ctx": 4096
+    },
+    "ops": {
+      "id": "ops",
+      "title": "Ops monitor",
+      "card": "ALPHA-ONE GPU/RAM/disk/services, Wally MentorPi reachability, Tailscale health. Prefer zero-LLM probes.",
+      "tier": "tool_caller",
+      "adapter": "ops",
+      "aliases": ["sys", "system", "status", "ops-monitor"],
+      "max_ctx": 2048
+    },
+    "general": {
+      "id": "general",
+      "title": "Jarvis general",
+      "card": "Conversational Jarvis fallback with a tiny context window. Default when no specialist fits.",
+      "tier": "general_chat",
+      "adapter": "ollama",
+      "aliases": ["jarvis", "chat"],
+      "max_ctx": 4096
+    }
+  },
+  "session": {
+    "max_raw_turns": 4,
+    "compact_after_turns": 6,
+    "compact_after_tokens": 1800,
+    "followup_idle_ms": 1800000,
+    "sessions_index": "orchestrator/sessions.json",
+    "sessions_dir": "orchestrator/sessions",
+    "shared_facts_file": "orchestrator/shared-facts.json"
+  },
+  "telemetry_file": "orchestrator/telemetry.jsonl",
+  "input": {
+    "max_excerpt_chars": 800,
+    "max_file_bytes": 262144
+  }
+}

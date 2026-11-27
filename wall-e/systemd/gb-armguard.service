@@ -1,0 +1,15 @@
+[Unit]
+Description=Grok Bot wake-phrase arming backstop (refuses motion until "wake up Wally"; never touches gb_gate)
+After=docker.service gb-gate.service
+Wants=docker.service
+[Service]
+Type=simple
+User=pi
+ExecStartPre=/bin/rm -f /home/pi/docker/tmp/gb_safety/ARMED
+ExecStart=/bin/bash /home/pi/grokbot/releases/e48d3d8/gb_armguard_run.sh
+ExecStopPost=-/usr/bin/docker exec -u ubuntu MentorPi pkill -INT -f /home/ubuntu/shared/gb_safety/armguard/gb_armguard.py
+Restart=always
+RestartSec=5
+KillMode=mixed
+[Install]
+WantedBy=multi-user.target

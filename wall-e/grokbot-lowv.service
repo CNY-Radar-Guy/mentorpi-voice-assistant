@@ -1,0 +1,18 @@
+[Unit]
+Description=Grok Bot low-voltage safety monitor (MentorPi 2S pack)
+After=multi-user.target docker.service
+
+[Service]
+Type=simple
+User=pi
+SupplementaryGroups=audio dialout
+WorkingDirectory=/home/pi/grokbot
+EnvironmentFile=/home/pi/grokbot/grokbot.env
+EnvironmentFile=-/home/pi/grokbot/secrets.env
+Environment=PYTHONUNBUFFERED=1 HOME=/home/pi
+ExecStart=/home/pi/grokbot/venv/bin/python /home/pi/grokbot/gb_lowv.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
