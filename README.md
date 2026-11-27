@@ -16,7 +16,7 @@ Central and local AI working together is the practical pattern this project is t
 
 ## An iterative, ground-up build
 
-This is not a kit demo or a finished product. Wall-E and Jarvis are being built from the ground up, one real-world failure at a time: John drives or sends the robot on a mission, something goes wrong on a real floor, the cause is diagnosed from logs and sensor data, a fix plus unit tests is deployed to the Pi, and the next run tests it again. The code in this repository is a snapshot of that loop, not a polished release. See [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md) for the full list of lessons.
+This is not a kit demo or a finished product. Wall-E and Jarvis are being built from the ground up, one real-world failure at a time: John drives or sends the robot on a mission, something goes wrong on a real floor, the cause is diagnosed from logs and sensor data, a fix plus unit tests is deployed to the Pi, and the next run tests it again. The code in this repository is a snapshot of that loop, not a polished release. See [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md) for the full list of lessons. Crashes and unexpected behavior are also written up by the automated RCA generator and watcher. The template, the learning-loop index, and the reports are in [`docs/rca/README.md`](docs/rca/README.md).
 
 ### Lessons learned so far
 
@@ -37,6 +37,7 @@ This is not a kit demo or a finished product. Wall-E and Jarvis are being built 
 | `wall-e/tests/` | Unit tests, including the November 27 fusion-recovery and stay-awake tests |
 | `jarvis/` | Jarvis local ops console on ALPHA-ONE: `server.js`, `public/index.html`, the `wally-*.js` Wall-E modules (drive, battery, intercom, tool), the orchestrator, and `tools/wally/remote.py` |
 | `docs/` | Build log and screenshots |
+| `docs/rca/` | Automated RCA generator, watcher, template, and the learning-loop index |
 
 Not included on purpose: runtime data, logs, audio, model weights (`*.onnx`), `.bak` backups, `__pycache__`, the Pi's `grokbot.env` / `secrets.env`, Jarvis `data/`, the browser profile, and the Roborock helper. Use `wall-e/grokbot.env.example` as the template for local settings.
 
@@ -112,6 +113,7 @@ Those stop distances and the deadman are in the published gate (`STOP_FWD` / `ST
 - Shared LiDAR + camera fusion stuck recovery with temporary halved side margin for tight squeezes, used by explore and go-to-destination missions, re-verified by the gate (`gb_fusion_recovery.py`, `gb_explore.py`, `gb_safety/gb_gate.py`).
 - Stay-awake after missions until bench mode or power-off (`grokbot_voice.py`).
 - Two-way intercom between Jarvis and Wall-E's speaker and mic, and the resized Jarvis layout.
+- Automated root-cause reports: generator and watcher in `wall-e/releases/e48d3d8/`, systemd unit `wall-e/systemd/gb-rca-watch.service`, plus the template and learning-loop index in [`docs/rca/README.md`](docs/rca/README.md).
 
 ## Limits and safety
 

@@ -1,0 +1,25 @@
+[Unit]
+Description=Wall-E RCA observer (read-only drafts in /home/pi/grokbot/data/rca; never arms or moves)
+After=multi-user.target
+# Intentionally not bound to gb-gate / gb-guard so a safety-unit restart cannot bounce this observer.
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/grokbot/releases/e48d3d8
+Environment=PYTHONUNBUFFERED=1 HOME=/home/pi
+Environment=GB_RCA_DIR=/home/pi/grokbot/data/rca
+Environment=GB_DATA=/home/pi/grokbot/data
+Environment=GB_SAFETY=/home/pi/docker/tmp/gb_safety
+Environment=GB_DOCS=/home/pi/grokbot/docs
+Environment=GB_RCA_POLL_S=5
+Environment=GB_RCA_COOLDOWN_S=900
+Nice=15
+CPUQuota=5%
+ExecStart=/home/pi/grokbot/venv/bin/python /home/pi/grokbot/releases/e48d3d8/gb_rca_watch.py
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
